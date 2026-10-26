@@ -19,6 +19,7 @@ import android.widget.Toast;
 
 import com.chaquo.python.PyObject;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
@@ -42,6 +43,8 @@ public class MainActivity extends Activity {
     /** 가상의 주소입니다. 네트워크로 나가지 않고 전부 이 앱이 응답합니다. */
     static final String HOST = "app.local";
     private static final int REQ_LOGIN = 1;
+    /** 한 번에 쌓을 수 있는 링크 수. 너무 많이 한꺼번에 요청하면 인스타그램이 계정을 제한할 수 있습니다. */
+    private static final int MAX_BATCH = 30;
 
     private static final Pattern IG_LINK = Pattern.compile(
             "https?://(?:www\\.|m\\.)?instagram\\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reels?|tv)/[A-Za-z0-9_-]+/?(?:\\?[^\\s]*)?",
@@ -70,9 +73,21 @@ public class MainActivity extends Activity {
         web = new WebView(this);
         setContentView(web);
         // 서비스가 저장을 끝내면 화면(JS)에 알려 토스트를 띄웁니다. 화면이 없으면 서비스가 알림으로 알립니다.
-        SaveService.listener = (id, ok, message) -> {
-            if (!isDestroyed()) {
-                saved(id, ok, message);
+        SaveService.listener = new SaveService.Listener() {
+            @Override
+            public void onResult(int id, boolean ok, String message) {
+                if (!isDestroyed()) {
+                    saved(id, ok, message);
+                }
+            }
+
+            @Override
+            public void onBatch(int batch, int done, int total, int saved, int skipped, int failed, boolean stopped,
+                                boolean finished, String message) {
+                if (!isDestroyed()) {
+                    js("window.__batch && window.__batch(" + batch + "," + done + "," + total + "," + saved + "," + skipped + ","
+                            + failed + "," + stopped + "," + finished + "," + JSONObject.quote(message) + ")");
+                }
             }
         };
         WebSettings s = web.getSettings();
@@ -222,6 +237,50 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** 링크 여러 개를 한꺼번에 백그라운드 저장. 묶음 번호를 돌려줍니다(0이면 시작 못 함). */
+        @JavascriptInterface
+        public int saveBatch(String urlsJson, boolean skipSaved) {
+            try {
+                JSONArray urls = new JSONArray(urlsJson);
+                int n = Math.min(urls.length(), MAX_BATCH);
+                if (n == 0) {
+                    return 0;
+                }
+                runOnUiThread(MainActivity.this::askNotificationPermissionOnce);
+                int batch = SaveService.registerBatch(n);
+                for (int i = 0; i < n; i++) {
+                    SaveService.enqueueInBatch(MainActivity.this, batch, urls.getString(i), skipSaved);
+                }
+                return batch;
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+
+        /** '저장한 프로필'에서 지우기. 이 계정의 저장 기록(이미 받음 표시 포함)을 지웁니다. 갤러리의 파일은 그대로입니다. */
+        @JavascriptInterface
+        public void removeProfile(String name) {
+            pool.submit(() -> {
+                api.callAttr("remove_profile", name);
+                js("window.__profilesChanged && window.__profilesChanged()");
+            });
+        }
+
+        /** 인스타그램 앱(없으면 브라우저)으로 프로필을 엽니다. 거기서 게시물을 공유하면 이 앱으로 들어옵니다. */
+        @JavascriptInterface
+        public void openProfile(String name) {
+            if (name == null || !name.matches("[A-Za-z0-9_.]{1,30}")) {
+                return; // 인스타그램 계정 이름 형식만 허용
+            }
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com/" + name + "/")));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "프로필을 열 수 있는 앱이 없어요", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
         @JavascriptInterface
         public void login() {
             runOnUiThread(() -> startActivityForResult(new Intent(MainActivity.this, LoginActivity.class), REQ_LOGIN));
@@ -265,11 +324,21 @@ public class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         // Android 10+는 앱이 화면 앞에 있을 때만 클립보드를 읽을 수 있습니다.
         if (hasFocus) {
-            Matcher m = IG_LINK.matcher(clipboardString());
-            if (m.find()) {
-                deliver(m.group(), "clipboard"); // 같은 링크 반복 처리는 화면(JS)이 막습니다
+            String links = allLinks(clipboardString());
+            if (!links.isEmpty()) {
+                deliver(links, "clipboard"); // 같은 링크 반복 처리는 화면(JS)이 막습니다
             }
         }
+    }
+
+    /** 글 속의 인스타그램 링크를 모두(중복 제거) 줄바꿈으로 이어 돌려줍니다. 없으면 빈 문자열. */
+    private static String allLinks(String text) {
+        Matcher m = IG_LINK.matcher(text == null ? "" : text);
+        java.util.LinkedHashSet<String> links = new java.util.LinkedHashSet<>();
+        while (m.find()) {
+            links.add(m.group());
+        }
+        return String.join("\n", links);
     }
 
     private String clipboardString() {
@@ -297,9 +366,9 @@ public class MainActivity extends Activity {
         if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
         String text = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (text == null) return;
-        Matcher m = IG_LINK.matcher(text);
-        if (m.find()) {
-            deliver(m.group(), "share");
+        String links = allLinks(text);
+        if (!links.isEmpty()) {
+            deliver(links, "share");
         } else {
             Toast.makeText(this, "인스타그램 게시물 링크가 아니에요", Toast.LENGTH_SHORT).show();
         }

@@ -54,6 +54,8 @@ def handle(method, path, query):
             return [200, ctype, data]
         if method == "GET" and path == "/api/cookies":
             return _json(200, lib.cookies_status())
+        if method == "GET" and path == "/api/profiles":
+            return _json(200, {"profiles": lib.list_profiles()})
         return _json(404, {"error": "없는 주소예요."})
     except lib.IgError as e:
         return _json(e.status, {"error": e.message})
@@ -62,23 +64,32 @@ def handle(method, path, query):
         return _json(500, {"error": "예상치 못한 오류가 났어요. 잠시 뒤 다시 시도해 주세요."})
 
 
-def save(url, index, cache_dir):
+def save(url, index, cache_dir, skip_saved=False):
     """게시물을 cache_dir 아래 임시 폴더에 받고 JSON 문자열로 결과를 돌려줍니다.
 
-    {"files": [{"path", "name", "mime"}]} 또는 {"error": "..."}. 갤러리 저장과 임시 폴더 정리는 자바가 합니다.
+    {"dir", "files": [{"path", "name", "mime"}], "code", "uploader"} / {"skipped": true} /
+    {"error": "...", "status": 429}. 갤러리 저장과 임시 폴더 정리는 자바가 하고, 갤러리 저장이 끝나면
+    자바가 mark_saved를 불러 '저장한 게시물'로 기록합니다(저장이 실패했는데 기록되는 일이 없도록).
+    skip_saved=True면 이미 받은 게시물은 인스타그램에 요청하지 않고 건너뜁니다(묶음 저장용).
     """
     lib = _igdl()
     try:
         code = lib.shortcode(url)
+        index = int(index)
+        if skip_saved and not index and lib.is_saved(code):
+            return json.dumps({"skipped": True, "code": code})
         dest = Path(tempfile.mkdtemp(prefix="save-", dir=cache_dir))
+        meta = {}
         try:
-            files = lib.fetch_post(url, dest, only=int(index) or None)
+            files = lib.fetch_post(url, dest, only=index or None, meta=meta)
         except BaseException:
             shutil.rmtree(dest, ignore_errors=True)
             raise
         return json.dumps(
             {
                 "dir": str(dest),
+                "code": code,
+                "uploader": meta.get("uploader") or "",
                 "files": [
                     {
                         "path": str(p),
@@ -91,10 +102,19 @@ def save(url, index, cache_dir):
             ensure_ascii=False,
         )
     except lib.IgError as e:
-        return json.dumps({"error": e.message}, ensure_ascii=False)
+        # status: 429(요청 제한)나 401(로그인 필요)이면 묶음 저장을 멈추는 신호로 씁니다.
+        return json.dumps({"error": e.message, "status": e.status}, ensure_ascii=False)
     except Exception:
         traceback.print_exc()
-        return json.dumps({"error": "저장 중 예상치 못한 오류가 났어요."}, ensure_ascii=False)
+        return json.dumps({"error": "저장 중 예상치 못한 오류가 났어요.", "status": 500}, ensure_ascii=False)
+
+
+def mark_saved(code, uploader):
+    _igdl().record_saved(code, uploader)
+
+
+def remove_profile(name):
+    _igdl().remove_profile(name)
 
 
 def save_cookies(sessionid, csrftoken):

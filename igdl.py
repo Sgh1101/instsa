@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import http.cookiejar
+import json
 import os
 import re
+import threading
 import time
 import zipfile
 from dataclasses import dataclass
@@ -69,7 +71,10 @@ def normalize_url(raw: str) -> str:
         raise IgError("인스타그램 주소만 지원합니다. 예: https://www.instagram.com/p/XXXX/")
     m = _PATH_RE.match(parsed.path)
     if not m:
-        raise IgError("게시물(/p/), 릴스(/reel/), IGTV(/tv/) 주소만 지원합니다. 스토리·프로필은 지원하지 않습니다.")
+        raise IgError(
+            "게시물(/p/), 릴스(/reel/), IGTV(/tv/) 링크만 지원해요. 프로필 전체 불러오기는 지원하지 않아요. "
+            "게시물 링크를 여러 개 붙여넣거나, '저장한 프로필'에서 인스타그램으로 열어 공유해 주세요."
+        )
     kind = "reel" if m["kind"].startswith("reel") else m["kind"]
     return f"https://www.instagram.com/{kind}/{m['code']}/"
 
@@ -153,6 +158,67 @@ def save_cookies(sessionid: str, csrftoken: str = "") -> None:
 
 def clear_cookies() -> None:
     _stored_cookie_file().unlink(missing_ok=True)
+
+
+# ---- 저장 기록 ---------------------------------------------------------------
+# 받은 게시물(code → 계정, 시각)을 data_dir/library.json에 남깁니다. 이미 받은 게시물을 건너뛰고,
+# '저장한 프로필' 목록(받은 게시물의 계정별 묶음)을 만드는 데 씁니다. 화면이 없는 백그라운드 저장에서도
+# 남아야 해서 화면(JS)이 아니라 여기에 저장합니다.
+_LIBRARY_LOCK = threading.Lock()
+
+
+def _library_path() -> Path:
+    return data_dir() / "library.json"
+
+
+def _load_library() -> dict:
+    try:
+        d = json.loads(_library_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"saved": {}}
+    return d if isinstance(d, dict) and isinstance(d.get("saved"), dict) else {"saved": {}}
+
+
+def _write_library(lib: dict) -> None:
+    path = _library_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(lib, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def record_saved(code: str, uploader: str | None) -> None:
+    with _LIBRARY_LOCK:
+        lib = _load_library()
+        lib["saved"][code] = {"u": uploader or "", "t": int(time.time())}
+        _write_library(lib)
+
+
+def is_saved(code: str) -> bool:
+    return code in _load_library()["saved"]
+
+
+def list_profiles() -> list[dict]:
+    """받은 게시물의 계정별 묶음. 최근에 받은 계정이 먼저."""
+    groups: dict[str, dict] = {}
+    for v in _load_library()["saved"].values():
+        name = v.get("u") or ""
+        if not name:
+            continue
+        g = groups.setdefault(name, {"name": name, "count": 0, "last": 0})
+        g["count"] += 1
+        g["last"] = max(g["last"], int(v.get("t", 0)))
+    return sorted(groups.values(), key=lambda g: g["last"], reverse=True)
+
+
+def remove_profile(name: str) -> None:
+    """이 계정의 저장 기록을 지웁니다(목록에서 사라지고, '이미 저장함' 표시도 사라짐). 갤러리의 파일은 그대로입니다."""
+    with _LIBRARY_LOCK:
+        lib = _load_library()
+        lib["saved"] = {c: v for c, v in lib["saved"].items() if v.get("u") != name}
+        _write_library(lib)
 
 
 def _ydl(opts: dict) -> yt_dlp.YoutubeDL:
@@ -255,6 +321,7 @@ def get_post(raw_url: str) -> dict:
 def post_for_ui(raw_url: str) -> dict:
     """화면에 보여 줄 게시물 정보. 미리보기는 인스타 CDN이 외부 Referer를 막을 수 있어 /api/thumb를 거칩니다."""
     post = get_post(raw_url)
+    post["saved"] = is_saved(post["code"])
     for item in post["items"]:
         if item["thumbnail"]:
             item["thumbnail"] = "/api/thumb?" + urlencode({"u": item["thumbnail"]})
@@ -306,10 +373,10 @@ def _download_image(url: str, dest_stem: Path) -> Path:
     return path
 
 
-def fetch_post(raw_url: str, dest: Path, only: int | None = None) -> list[tuple[int, Path]]:
+def fetch_post(raw_url: str, dest: Path, only: int | None = None, meta: dict | None = None) -> list[tuple[int, Path]]:
     """게시물의 영상·사진을 dest에 저장하고 (항목 번호, 파일 경로) 목록을 돌려줍니다.
 
-    only를 주면 캐러셀의 해당 번호(1부터) 항목만 받습니다.
+    only를 주면 캐러셀의 해당 번호(1부터) 항목만 받습니다. meta를 주면 {"code", "uploader"}를 채워 줍니다.
     """
     url = normalize_url(raw_url)
     dest.mkdir(parents=True, exist_ok=True)
@@ -329,6 +396,9 @@ def fetch_post(raw_url: str, dest: Path, only: int | None = None) -> list[tuple[
             info = ydl.extract_info(url, download=False)
             if not info:
                 raise IgError("게시물 정보를 가져오지 못했습니다.", 502)
+            if meta is not None:
+                meta["code"] = shortcode(url)
+                meta["uploader"] = info.get("channel") or info.get("uploader")
             entries = _entries(info)
             is_playlist = info.get("_type") == "playlist"
             if not entries or (only and not is_playlist and only != 1):

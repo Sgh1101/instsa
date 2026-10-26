@@ -108,6 +108,33 @@
            border: 1px solid var(--error); font-size: .9rem; transition: .25s; z-index: 10; }
   #toast.show { transform: translate(-50%, 0); opacity: 1; }
   #toast.info { background: var(--card); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
+  /* 링크 묶음 */
+  .batch { padding: 14px; }
+  .batch-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+  .batch-list { list-style: none; margin: 0 0 10px; padding: 0; max-height: 180px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; }
+  .batch-list li { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: .85rem; border-bottom: 1px solid var(--line); }
+  .batch-list li:last-child { border-bottom: 0; }
+  .batch-list .k { color: var(--muted); flex: none; }
+  .batch-list .c { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .progress { margin-top: 12px; }
+  .bar { height: 8px; border-radius: 999px; background: var(--fill); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--btn); transition: width .3s; }
+  .progress p { margin: 8px 0 0; color: var(--muted); font-size: .84rem; }
+  .batch .auto { margin: 4px 0 0; }
+
+  /* 저장한 프로필 */
+  .profiles { margin-top: 20px; }
+  .profiles h2 { font-size: .95rem; margin: 0 0 8px 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pchip { display: flex; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .pchip-open { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .pchip-open .ring { width: 30px; height: 30px; padding: 2px; }
+  .pchip-open .avatar { font-size: .75rem; }
+  .pchip-open b { font-size: .9rem; }
+  .pchip-open small { color: var(--muted); font-size: .75rem; }
+  .pchip-del { border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: 8px 12px 8px 4px; cursor: pointer; }
+  .profiles .note { margin: 8px 4px 0; color: var(--muted); font-size: .78rem; }
+
   /* 로그인 설정 */
   .settings { margin-top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
   .settings summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -153,6 +180,13 @@
   <label class="auto"><input id="autosave" type="checkbox"> 링크를 인식하면 바로 저장</label>
   <p id="hint" class="hint" hidden></p>
 
+  <article id="batch" class="post batch" hidden>
+    <div class="batch-head"><b id="batchTitle"></b><span id="batchSub" class="meta"></span></div>
+    <ul id="batchList" class="batch-list"></ul>
+    <label id="reSaveRow" class="auto"><input id="reSave" type="checkbox"> 이미 저장한 게시물도 다시 받기</label>
+    <div id="batchProgress" class="progress" hidden><div class="bar"><i id="batchBar"></i></div><p id="batchText"></p></div>
+  </article>
+
   <article id="skeleton" class="post skel" hidden aria-hidden="true">
     <div class="post-head"><div class="ring"></div><div class="line"></div></div>
     <div class="slide" style="flex:none;aspect-ratio:4/5"></div>
@@ -169,6 +203,12 @@
     <p id="caption" class="caption" title="눌러서 펼치기"></p>
   </article>
   <div id="dock" class="dock" hidden><button id="main" class="btn primary block" type="button"></button></div>
+
+  <section id="profiles" class="profiles" hidden>
+    <h2>저장한 프로필</h2>
+    <div id="profileList" class="chips"></div>
+    <p class="note">누르면 인스타그램으로 열려요. 거기서 게시물을 공유하면 바로 저장돼요. ✕는 저장 기록만 지워요(받은 파일은 그대로).</p>
+  </section>
 
   <details id="settings" class="settings">
     <summary><span>인스타그램 로그인 설정</span><span id="cookieState" class="pill">확인 중</span></summary>
@@ -214,6 +254,9 @@ const ICON_SPIN = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="cur
 const IG_RE = /https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[A-Za-z0-9_.]+\/)?(?:p|reels?|tv)\/[A-Za-z0-9_-]+\/?(?:\?[^\s]*)?/i;
 
 let current = null;
+let mode = 'post';   // 'post'(게시물 1개) | 'batch'(링크 묶음)
+let batchLinks = [];
+let activeBatch = null;
 let busy = false;
 let toastTimer;
 
@@ -231,6 +274,18 @@ function toast(text, kind = 'error', ms = 5000) {
 }
 
 function findLink(text) { const m = IG_RE.exec(text || ''); return m ? m[0] : null; }
+// 글 속의 인스타그램 링크를 모두(같은 게시물은 한 번만) 찾습니다.
+const IG_RE_ALL = new RegExp(IG_RE.source, 'gi');
+function linkCode(link) { const m = /(?:p|reels?|tv)\/([A-Za-z0-9_-]+)/i.exec(link); return m ? m[1] : link; }
+function findLinks(text) {
+  const seen = new Set(), out = [];
+  for (const m of (text || '').matchAll(IG_RE_ALL)) {
+    const code = linkCode(m[0]);
+    if (!seen.has(code)) { seen.add(code); out.push(m[0]); }
+  }
+  return out;
+}
+const MAX_BATCH = 30; // 한 번에 너무 많이 요청하면 인스타그램이 계정을 제한할 수 있어요
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -254,7 +309,7 @@ function render(post) {
   $('who').textContent = name ? '@' + name : '인스타그램';
   $('avatar').textContent = (name[0] || 'I').toUpperCase();
   const v = post.items.filter((i) => i.kind === 'video').length, p = post.items.length - v;
-  $('meta').textContent = [v && `영상 ${v}`, p && `사진 ${p}`].filter(Boolean).join(' · ');
+  $('meta').textContent = [v && `영상 ${v}`, p && `사진 ${p}`, post.saved && '이미 저장함'].filter(Boolean).join(' · ');
   const cap = $('caption');
   cap.textContent = post.caption || '';
   cap.classList.remove('open');
@@ -293,6 +348,7 @@ function render(post) {
   syncDots();
 
   const main = $('main');
+  main.disabled = false; // 묶음 저장이 도는 중에 다른 게시물을 열어도 그 게시물은 저장할 수 있어야 함
   main.innerHTML = ICON_DL + '<span></span>';
   main.lastChild.textContent = many ? `전체 저장 (zip · ${post.items.length}개)` : (post.items[0].kind === 'video' ? '영상 저장' : '사진 저장');
   $('post').hidden = false;
@@ -313,6 +369,20 @@ $('rail').addEventListener('scroll', () => requestAnimationFrame(syncDots), { pa
 $('caption').addEventListener('click', (e) => e.currentTarget.classList.toggle('open'));
 
 /* ---------- 저장 ---------- */
+// 웹(브라우저) 버전: 서버가 받은 파일을 브라우저 다운로드로 내려받습니다.
+async function browserDownload(url, index) {
+  const qs = new URLSearchParams({ url });
+  if (index) qs.set('index', index);
+  const res = await api('/api/download?' + qs);
+  const blob = await res.blob();
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? decodeURIComponent(m[1]) : 'instagram';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
 async function save(button, index) {
   if (!current) return;
   const html = button.innerHTML;
@@ -324,18 +394,10 @@ async function save(button, index) {
       toast('저장 중이에요. 앱을 나가도 계속돼요', 'info', 2500);
       toast(await nativeSave(index), 'info', 2500);
     } else {
-      const qs = new URLSearchParams({ url: current.url });
-      if (index) qs.set('index', index);
-      const res = await api('/api/download?' + qs);
-      const blob = await res.blob();
-      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = m ? decodeURIComponent(m[1]) : 'instagram';
-      document.body.append(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      await browserDownload(current.url, index);
       toast('저장했어요', 'info', 2200);
     }
+    loadProfiles();
   } catch (e) {
     toast(e.message);
   } finally {
@@ -343,14 +405,94 @@ async function save(button, index) {
     button.innerHTML = html;
   }
 }
-$('main').addEventListener('click', (e) => save(e.currentTarget, null));
+$('main').addEventListener('click', (e) => (mode === 'batch' ? startBatch() : save(e.currentTarget, null)));
+
+/* ---------- 링크 묶음 ---------- */
+function showBatch(links, source) {
+  const shown = links.slice(0, MAX_BATCH);
+  batchLinks = shown;
+  mode = 'batch';
+  $('post').hidden = true;
+  $('skeleton').hidden = true;
+  $('url').value = shown[0];
+  $('batchTitle').textContent = `링크 ${links.length}개를 찾았어요`;
+  $('batchSub').textContent = links.length > MAX_BATCH
+    ? `한 번에 ${MAX_BATCH}개까지만 저장해요. 나머지 ${links.length - MAX_BATCH}개는 이 묶음이 끝난 뒤에 다시 붙여넣어 주세요.`
+    : '순서대로, 간격을 두고 저장해요. 앱을 나가도 계속돼요.';
+  const list = $('batchList');
+  list.replaceChildren();
+  for (const link of shown) {
+    const li = document.createElement('li');
+    const kind = document.createElement('span');
+    kind.className = 'k';
+    kind.textContent = /\/reels?\//i.test(link) ? '릴스' : /\/tv\//i.test(link) ? 'IGTV' : '게시물';
+    const code = document.createElement('span');
+    code.className = 'c';
+    code.textContent = linkCode(link);
+    li.append(kind, code);
+    list.append(li);
+  }
+  $('reSaveRow').hidden = !IN_APP;   // '이미 받은 게시물 건너뛰기'는 앱에서만(저장 기록을 앱이 관리)
+  $('batchProgress').hidden = true;
+  const main = $('main');
+  main.disabled = false;
+  main.innerHTML = ICON_DL + '<span></span>';
+  main.lastChild.textContent = `${shown.length}개 모두 저장`;
+  $('batch').hidden = false;
+  showDock(true);
+  if (source) setDetect(source, true, `${source === 'share' ? '공유' : '클립보드'}에서 링크 ${links.length}개를 찾았어요`);
+  // 묶음은 '바로 저장'을 켜 두어도 자동으로 시작하지 않습니다(한꺼번에 많이 요청하는 건 눌러서 확인).
+}
+
+function updateBatchProgress(done, total, text) {
+  $('batchProgress').hidden = false;
+  $('batchBar').style.width = (total ? (done / total) * 100 : 0) + '%';
+  $('batchText').textContent = text;
+}
+
+async function startBatch() {
+  if (!batchLinks.length) return;
+  const btn = $('main');
+  btn.disabled = true;
+  updateBatchProgress(0, batchLinks.length, '준비 중…');
+  if (IN_APP) {
+    const id = AndroidBridge.saveBatch(JSON.stringify(batchLinks), !$('reSave').checked);
+    if (!id) { toast('저장을 시작하지 못했어요'); btn.disabled = false; return; }
+    activeBatch = id;
+    toast('저장을 시작했어요. 앱을 나가도 계속돼요', 'info', 3000);
+  } else {
+    await webBatch(batchLinks);
+    btn.disabled = false;
+  }
+}
+
+// 웹(브라우저) 버전: 한 개씩 순서대로, 인스타그램 요청 제한을 덜 건드리도록 간격을 두고 받습니다.
+async function webBatch(links) {
+  let saved = 0, failed = 0, stopped = false;
+  for (let i = 0; i < links.length; i++) {
+    updateBatchProgress(i, links.length, `${i + 1}/${links.length} 받는 중…`);
+    try { await browserDownload(links[i]); saved++; }
+    catch (e) {
+      failed++;
+      toast(e.message);
+      if (/제한|로그인|쿠키/.test(e.message)) { stopped = true; break; }
+    }
+    if (i < links.length - 1) await new Promise((r) => setTimeout(r, 4000 + Math.random() * 3000));
+  }
+  const msg = `${saved}개 저장${failed ? `, ${failed}개 실패` : ''}${stopped ? '. 인스타그램이 요청을 제한해서 멈췄어요. 잠시 뒤 다시 시도해 주세요.' : ''}`;
+  updateBatchProgress(links.length, links.length, msg);
+  toast(msg, stopped || failed ? 'error' : 'info', 7000);
+  loadProfiles();
+}
 
 /* ---------- 조회 ---------- */
 async function lookup(raw, source) {
   if (busy) return;
   busy = true;
+  mode = 'post';
   $('go').disabled = true;
   $('post').hidden = true;
+  $('batch').hidden = true;
   showDock(false);
   $('skeleton').hidden = false;
   setDetect(source, false);
@@ -371,29 +513,31 @@ async function lookup(raw, source) {
   }
 }
 
-function setDetect(source, done) {
+function setDetect(source, done, customText) {
   const el = $('detect');
   if (!source) { el.hidden = true; return; }
   const label = { clipboard: '클립보드', share: '공유' }[source];
-  $('detectText').textContent = done ? `${label}에서 링크를 찾아 불러왔어요` : `${label}에서 링크를 찾았어요. 불러오는 중…`;
+  $('detectText').textContent = customText || (done ? `${label}에서 링크를 찾아 불러왔어요` : `${label}에서 링크를 찾았어요. 불러오는 중…`);
   el.classList.toggle('done', !!done);
   el.hidden = false;
 }
 
 function startFrom(text, source) {
-  const link = findLink(text);
-  if (!link) return false;
-  $('url').value = link;
-  lookup(link, source);
+  const links = findLinks(text);
+  if (!links.length) return false;
+  if (links.length > 1) { showBatch(links, source); return true; } // 링크가 여러 개면 묶음으로
+  $('url').value = links[0];
+  lookup(links[0], source);
   return true;
 }
 
 $('form').addEventListener('submit', (e) => {
   e.preventDefault();
   const typed = $('url').value.trim();
-  const link = findLink(typed); // 입력칸에 글이 섞여 붙여넣어져도 링크만 사용
-  if (link) $('url').value = link;
-  lookup(link || typed, null);
+  const links = findLinks(typed); // 입력칸에 글이 섞여 붙여넣어져도 링크만 사용
+  if (links.length > 1) return showBatch(links, null);
+  if (links[0]) $('url').value = links[0];
+  lookup(links[0] || typed, null);
 });
 
 /* ---------- 클립보드 자동 인식 ---------- */
@@ -414,10 +558,11 @@ async function checkClipboard() {
   if (!clipboardSupported || busy || document.visibilityState !== 'visible') return;
   try {
     const text = await navigator.clipboard.readText();
-    const link = findLink(text);
-    if (link && !seenRecently(link)) {
-      markSeen(link);
-      startFrom(link, 'clipboard');
+    const links = findLinks(text);
+    const key = links.join('\n');
+    if (links.length && !seenRecently(key)) {
+      markSeen(key);
+      startFrom(key, 'clipboard');
     }
     $('hint').hidden = true;
   } catch (e) {
@@ -433,9 +578,10 @@ $('paste').addEventListener('click', async () => {
     const text = IN_APP ? AndroidBridge.clipboardText() : await navigator.clipboard.readText();
     if (!text) return toast('클립보드가 비어 있어요. 인스타그램에서 링크를 복사해 주세요.', 'info');
     // 메신저에서 복사한 "이거 봐 https://…"처럼 글이 섞여 있어도 링크만 뽑아 씁니다.
-    const link = findLink(text);
-    if (link) markSeen(link);
-    $('url').value = link || text.trim();
+    const links = findLinks(text);
+    if (links.length) markSeen(links.join('\n'));
+    if (links.length > 1) return showBatch(links, null);
+    $('url').value = links[0] || text.trim();
     lookup($('url').value, null);
   } catch {
     $('url').focus();
@@ -484,7 +630,56 @@ $('cookieDel').addEventListener('click', async () => {
   try { await cookieRequest('DELETE'); toast('삭제했어요', 'info', 2000); } catch (err) { toast(err.message); }
 });
 
+/* ---------- 저장한 프로필 ---------- */
+function relativeDay(ts) {
+  const days = Math.floor((Date.now() / 1000 - ts) / 86400);
+  return days <= 0 ? '오늘' : days === 1 ? '어제' : `${days}일 전`;
+}
+function renderProfiles(list) {
+  const box = $('profileList');
+  box.replaceChildren();
+  $('profiles').hidden = !list.length;
+  for (const p of list) {
+    const card = document.createElement('div');
+    card.className = 'pchip';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'pchip-open';
+    open.title = '인스타그램에서 열기';
+    const ring = document.createElement('div'); ring.className = 'ring';
+    const av = document.createElement('div'); av.className = 'avatar'; av.textContent = (p.name[0] || '?').toUpperCase();
+    ring.append(av);
+    const text = document.createElement('div');
+    const name = document.createElement('b'); name.textContent = '@' + p.name;
+    const sub = document.createElement('small'); sub.textContent = ` ${p.count}개 · ${relativeDay(p.last)}`;
+    text.append(name, sub);
+    open.append(ring, text);
+    open.addEventListener('click', () => openProfile(p.name));
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'pchip-del'; del.textContent = '✕';
+    del.setAttribute('aria-label', `@${p.name} 저장 기록 지우기`);
+    del.addEventListener('click', () => removeProfile(p.name));
+    card.append(open, del);
+    box.append(card);
+  }
+}
+async function loadProfiles() {
+  try { renderProfiles((await (await api('/api/profiles')).json()).profiles); } catch { /* 목록이 없어도 앱은 동작 */ }
+}
+function openProfile(name) {
+  if (IN_APP) AndroidBridge.openProfile(name);
+  else window.open('https://www.instagram.com/' + encodeURIComponent(name) + '/', '_blank', 'noopener');
+}
+async function removeProfile(name) {
+  if (!confirm(`@${name}의 저장 기록을 지울까요?\n받은 파일은 그대로 남고, '이미 저장함' 표시만 사라져요.`)) return;
+  try {
+    if (IN_APP) AndroidBridge.removeProfile(name);
+    else { await api('/api/profiles?name=' + encodeURIComponent(name), { method: 'DELETE' }); loadProfiles(); }
+  } catch (err) { toast(err.message); }
+}
+
 /* ---------- 시작 ---------- */
+loadProfiles();
 api('/api/cookies').then((r) => r.json()).then(setCookieState).catch(() => { $('cookieState').textContent = '—'; });
 $('autosave').checked = store.get('autosave') === '1';
 $('autosave').addEventListener('change', (e) => store.set('autosave', e.target.checked ? '1' : '0'));
@@ -504,13 +699,35 @@ if (IN_APP) {
   $('appCookie').hidden = false;
 
   // 앱이 인스타그램 링크를 찾았을 때(클립보드: 앱을 열 때 / 공유: 인스타그램의 공유 시트에서)
-  window.__nativeLink = (link, source) => {
+  // text에는 링크가 하나 이상(줄바꿈으로 구분) 들어 있습니다.
+  window.__nativeLink = (text, source) => {
+    const links = findLinks(text);
+    if (!links.length) return;
     if (source === 'clipboard') {
-      if (seenRecently(link)) return; // 방금 처리한 링크를 앱을 열 때마다 다시 불러오지 않음
-      markSeen(link);
+      const key = links.join('\n');
+      if (seenRecently(key)) return; // 방금 처리한 링크를 앱을 열 때마다 다시 불러오지 않음
+      markSeen(key);
     }
-    startFrom(link, source === 'share' ? 'share' : 'clipboard');
+    startFrom(links.join('\n'), source === 'share' ? 'share' : 'clipboard');
   };
+
+  // 묶음 저장 진행(서비스가 하나 끝낼 때마다 호출). 화면이 꺼져 있던 동안의 결과는 알림으로 갑니다.
+  window.__batch = (batch, done, total, saved, skipped, failed, stopped, finished, message) => {
+    if (batch !== activeBatch) {
+      // 이 화면이 시작한 묶음이 아님(화면을 다시 열었거나 다른 묶음). 진행 화면은 건드리지 않고 끝났다면 요약만 알립니다.
+      if (finished) { toast(message, stopped || failed ? 'error' : 'info', 7000); loadProfiles(); }
+      return;
+    }
+    const detail = `${saved}개 저장${skipped ? `, ${skipped}개는 이미 받아서 건너뜀` : ''}${failed ? `, ${failed}개 실패` : ''}`;
+    updateBatchProgress(done, total, finished ? message : `${done}/${total} 처리 중… (${detail})`);
+    if (finished) {
+      activeBatch = null;
+      if (mode === 'batch') $('main').disabled = false; // 지금 묶음 화면일 때만(낱개 저장 중인 버튼은 건드리지 않음)
+      toast(message, stopped || failed ? 'error' : 'info', 7000);
+      loadProfiles();
+    }
+  };
+  window.__profilesChanged = () => loadProfiles();
 
   // 저장은 앱이 하고(갤러리), 끝나면 결과를 알려 줍니다.
   const pendingSaves = new Map();

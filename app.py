@@ -135,6 +135,17 @@ def service_worker():
     return resp
 
 
+@app.get("/api/profiles")
+def profiles_get():
+    return jsonify(profiles=igdl.list_profiles())
+
+
+@app.delete("/api/profiles")
+def profiles_delete():
+    igdl.remove_profile(request.args.get("name", ""))
+    return jsonify(profiles=igdl.list_profiles())
+
+
 @app.get("/api/cookies")
 def cookies_get():
     return jsonify(igdl.cookies_status())  # 값은 절대 돌려주지 않습니다
@@ -178,7 +189,10 @@ def download():
 
     tmp = Path(tempfile.mkdtemp(prefix="igdl-"))
     try:
-        files = igdl.fetch_post(url, tmp / "raw", only=index)
+        meta = {}
+        files = igdl.fetch_post(url, tmp / "raw", only=index, meta=meta)
+        if not index:  # 게시물 전체를 받았을 때만 '저장한 게시물'로 기록(일부 항목만 받은 경우는 제외)
+            igdl.record_saved(meta.get("code") or code, meta.get("uploader"))
         if len(files) == 1:
             n, path = files[0]
             send_path, name = path, f"{code}_{n:02d}{path.suffix}"

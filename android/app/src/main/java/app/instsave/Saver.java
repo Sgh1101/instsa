@@ -27,26 +27,59 @@ final class Saver {
         final String message;
         final Uri lastUri;     // 알림을 눌렀을 때 열어 줄 마지막 파일
         final String lastMime;
+        final int status;      // 실패 원인 코드(429: 요청 제한, 401: 로그인 필요 등). 없으면 0
+        final boolean skipped; // 이미 받은 게시물이라 건너뜀(인스타그램에 요청하지 않음)
+        final boolean cancelled; // 앞선 실패로 묶음이 중단되어 실행하지 않음
 
-        Result(boolean ok, String message, Uri lastUri, String lastMime) {
+        Result(boolean ok, String message, Uri lastUri, String lastMime, int status, boolean skipped, boolean cancelled) {
             this.ok = ok;
             this.message = message;
             this.lastUri = lastUri;
             this.lastMime = lastMime;
+            this.status = status;
+            this.skipped = skipped;
+            this.cancelled = cancelled;
+        }
+
+        static Result ok(String message, Uri uri, String mime) {
+            return new Result(true, message, uri, mime, 0, false, false);
+        }
+
+        static Result failed(String message, int status) {
+            return new Result(false, message, null, null, status, false, false);
+        }
+
+        static Result skipped() {
+            return new Result(true, "이미 저장한 게시물이라 건너뛰었어요", null, null, 0, true, false);
+        }
+
+        static Result cancelled() {
+            return new Result(false, "앞선 오류로 멈췄어요", null, null, 0, false, true);
+        }
+
+        /** 요청 제한이거나 로그인이 필요해서, 같은 묶음의 나머지를 계속하면 계정만 더 막힐 상황. */
+        boolean shouldStopBatch() {
+            return !ok && (status == 429 || status == 401);
         }
     }
 
     private Saver() {}
 
-    /** index가 0이면 전부, 아니면 해당 번호(1부터) 항목만. 블로킹 호출이라 백그라운드 스레드에서 부르세요. */
-    static Result save(Context context, String url, int index) {
+    /**
+     * index가 0이면 전부, 아니면 해당 번호(1부터) 항목만. skipSaved면 이미 받은 게시물은 건너뜁니다.
+     * 블로킹 호출이라 백그라운드 스레드에서 부르세요.
+     */
+    static Result save(Context context, String url, int index, boolean skipSaved) {
         File dir = null;
         try {
             PyObject api = PyHost.api(context);
-            String json = api.callAttr("save", url, index, context.getCacheDir().getAbsolutePath()).toString();
+            String json = api.callAttr("save", url, index, context.getCacheDir().getAbsolutePath(), skipSaved).toString();
             JSONObject o = new JSONObject(json);
+            if (o.optBoolean("skipped")) {
+                return Result.skipped();
+            }
             if (o.has("error")) {
-                return new Result(false, o.getString("error"), null, null);
+                return Result.failed(o.getString("error"), o.optInt("status", 0));
             }
             dir = new File(o.getString("dir"));
             JSONArray files = o.getJSONArray("files");
@@ -58,9 +91,13 @@ final class Saver {
                 last = saveToGallery(context, new File(f.getString("path")), f.getString("name"), mime);
                 lastMime = mime;
             }
-            return new Result(true, files.length() + "개를 갤러리에 저장했어요", last, lastMime);
+            if (index == 0) {
+                // 갤러리 저장까지 끝난 게시물만 '저장한 게시물'로 기록합니다(다음 묶음 저장에서 건너뛰고, 프로필 목록에 올라감).
+                api.callAttr("mark_saved", o.optString("code"), o.optString("uploader"));
+            }
+            return Result.ok(files.length() + "개를 갤러리에 저장했어요", last, lastMime);
         } catch (Exception e) {
-            return new Result(false, "저장하지 못했어요: " + e.getMessage(), null, null);
+            return Result.failed("저장하지 못했어요: " + e.getMessage(), 0);
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);
