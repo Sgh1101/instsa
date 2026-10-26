@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'app.instsave'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'app.instsave'
+        minSdk 29          // Android 10+: 갤러리 저장에 저장소 권한이 필요 없음(MediaStore)
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+
+        // 2017년 이후 거의 모든 안드로이드 폰은 arm64입니다. (에뮬레이터를 쓰려면 'x86_64'를 추가하세요.)
+        ndk { abiFilters 'arm64-v8a' }
+
+        python {
+            version '3.12'
+            pip {
+                // 순수 파이썬 패키지만 씁니다(앱 안에서 컴파일 불필요). 서버 테스트와 같은 버전으로 고정.
+                install 'yt-dlp==2026.10.21'
+                install 'requests==2.34.2'
+            }
+        }
+    }
+
+    buildTypes {
+        release { minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets {
+        main {
+            // 저장소 루트의 화면(static/)과 다운로드 로직(igdl.py)을 그대로 앱에 넣습니다. 복사본을 따로 두지 않습니다.
+            assets.srcDir layout.buildDirectory.dir('generated/web')
+            python.srcDir layout.buildDirectory.dir('generated/python')
+        }
+    }
+}
+
+tasks.register('copyWeb', Copy) {
+    from('../../static') { exclude 'login.html', 'sw.js' }
+    into layout.buildDirectory.dir('generated/web/web/static')
+}
+tasks.register('copyPython', Copy) {
+    from('../../igdl.py')
+    into layout.buildDirectory.dir('generated/python')
+}
+tasks.named('preBuild') { dependsOn 'copyWeb', 'copyPython' }
+// 복사 결과물을 읽는 작업이 복사가 끝난 뒤에 돌도록 의존 관계를 명시합니다(Gradle이 검증합니다).
+tasks.configureEach { t ->
+    if (t.name == 'copyPython' || t.name == 'copyWeb') return
+    if (t.name.contains('PythonSources')) t.dependsOn 'copyPython'
+    if (t.name.contains('Assets')) t.dependsOn 'copyWeb'
+}

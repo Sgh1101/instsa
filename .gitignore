@@ -6,3 +6,11 @@ venv/
 # 로그인 쿠키는 절대 커밋하지 않습니다
 cookies*.txt
 *.cookies
+
+# Android 빌드 산출물 / 로컬 설정 (gradle-wrapper.jar는 커밋합니다)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab

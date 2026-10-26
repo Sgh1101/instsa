@@ -174,19 +174,28 @@
     <summary><span>인스타그램 로그인 설정</span><span id="cookieState" class="pill">확인 중</span></summary>
     <div class="settings-body">
       <p>로그인 없이 쓰면 인스타그램이 몇 번 이용한 뒤 요청을 막아요. 쿠키를 등록하면 막힘이 줄고, 내가 팔로우 중인 비공개 계정 게시물도 받을 수 있어요.</p>
-      <ol>
-        <li>PC 브라우저에서 인스타그램에 로그인</li>
-        <li><b>F12</b> → <b>Application(애플리케이션)</b> → <b>Cookies</b> → instagram.com</li>
-        <li><b>sessionid</b>의 값(Value)을 복사해 아래에 붙여넣기 (폰으로는 "나에게 보내기"로 전달)</li>
-      </ol>
-      <form id="cookieForm" autocomplete="off">
-        <input id="sessionid" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sessionid 값" aria-label="sessionid 값">
-        <input id="csrftoken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="csrftoken 값 (선택)" aria-label="csrftoken 값 (선택)">
+      <div id="webCookie">
+        <ol>
+          <li>PC 브라우저에서 인스타그램에 로그인</li>
+          <li><b>F12</b> → <b>Application(애플리케이션)</b> → <b>Cookies</b> → instagram.com</li>
+          <li><b>sessionid</b>의 값(Value)을 복사해 아래에 붙여넣기 (폰으로는 "나에게 보내기"로 전달)</li>
+        </ol>
+        <form id="cookieForm" autocomplete="off">
+          <input id="sessionid" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sessionid 값" aria-label="sessionid 값">
+          <input id="csrftoken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="csrftoken 값 (선택)" aria-label="csrftoken 값 (선택)">
+          <div class="row">
+            <button class="btn primary" type="submit">저장</button>
+            <button id="cookieDel" class="btn soft" type="button" hidden>삭제</button>
+          </div>
+        </form>
+      </div>
+      <div id="appCookie" hidden>
+        <p>아래 버튼을 누르면 인스타그램 로그인 화면이 열려요. 로그인하면 자동으로 이 앱에 저장됩니다. 비밀번호는 인스타그램이 직접 받고, 이 앱은 로그인 쿠키만 가져와요.</p>
         <div class="row">
-          <button class="btn primary" type="submit">저장</button>
-          <button id="cookieDel" class="btn soft" type="button" hidden>삭제</button>
+          <button id="appLogin" class="btn primary" type="button">인스타그램에 로그인</button>
+          <button id="appLogout" class="btn soft" type="button" hidden>로그인 해제</button>
         </div>
-      </form>
+      </div>
       <p class="warn">쿠키는 내 계정의 로그인 권한과 같아요. <b>부계정</b>을 쓰고 다른 사람에게 보내지 마세요. 저장된 값은 이 앱의 서버에만 있고 화면에 다시 보여주지 않아요. 인스타그램에서 로그아웃하면 쿠키는 무효가 됩니다.</p>
     </div>
   </details>
@@ -197,6 +206,8 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// 안드로이드 앱 안(WebView)에서 열렸는가. 앱이 AndroidBridge를 넣어 줍니다.
+const IN_APP = !!window.AndroidBridge;
 // 정적 문자열만 innerHTML로 넣습니다(사용자 데이터는 항상 textContent).
 const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>';
 const ICON_SPIN = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.55"/></svg>';
@@ -308,17 +319,22 @@ async function save(button, index) {
   button.disabled = true;
   button.innerHTML = button.classList.contains('round') ? ICON_SPIN : ICON_SPIN + '<span>받는 중…</span>';
   try {
-    const qs = new URLSearchParams({ url: current.url });
-    if (index) qs.set('index', index);
-    const res = await api('/api/download?' + qs);
-    const blob = await res.blob();
-    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = m ? decodeURIComponent(m[1]) : 'instagram';
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    toast('저장했어요', 'info', 2200);
+    if (IN_APP) {
+      // 앱: 서버 없이 앱이 직접 받아서 갤러리에 저장합니다.
+      toast(await nativeSave(index), 'info', 2500);
+    } else {
+      const qs = new URLSearchParams({ url: current.url });
+      if (index) qs.set('index', index);
+      const res = await api('/api/download?' + qs);
+      const blob = await res.blob();
+      const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = m ? decodeURIComponent(m[1]) : 'instagram';
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      toast('저장했어요', 'info', 2200);
+    }
   } catch (e) {
     toast(e.message);
   } finally {
@@ -338,7 +354,8 @@ async function lookup(raw, source) {
   $('skeleton').hidden = false;
   setDetect(source, false);
   try {
-    const res = await api('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: raw }) });
+    // GET으로 보냅니다(앱의 WebView는 POST 본문을 가로챌 수 없음).
+    const res = await api('/api/info?url=' + encodeURIComponent(raw));
     render(await res.json());
     setDetect(source, true);
     if (source && $('autosave').checked) await save($('main'), null);
@@ -370,11 +387,18 @@ function startFrom(text, source) {
   return true;
 }
 
-$('form').addEventListener('submit', (e) => { e.preventDefault(); lookup($('url').value.trim(), null); });
+$('form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const typed = $('url').value.trim();
+  const link = findLink(typed); // 입력칸에 글이 섞여 붙여넣어져도 링크만 사용
+  if (link) $('url').value = link;
+  lookup(link || typed, null);
+});
 
 /* ---------- 클립보드 자동 인식 ---------- */
 // 브라우저 정책: Chrome은 최초 1회 허용 후 자동, Safari/Firefox는 읽을 때마다 확인창, HTTP 주소에서는 사용 불가.
-const clipboardSupported = !!(navigator.clipboard && navigator.clipboard.readText && window.isSecureContext);
+// 앱 안에서는 클립보드를 앱(자바)이 직접 읽어 window.__nativeLink로 넘겨주므로 웹 방식은 쓰지 않습니다.
+const clipboardSupported = !IN_APP && !!(navigator.clipboard && navigator.clipboard.readText && window.isSecureContext);
 
 // 방금 처리한 링크가 클립보드에 그대로 남아 있어도, 앱을 열 때마다 다시 불러오지 않도록 30분간 기억합니다.
 // (그 뒤나 "붙여넣기" 버튼으로는 언제든 다시 받을 수 있어요.)
@@ -405,11 +429,12 @@ async function checkClipboard() {
 
 $('paste').addEventListener('click', async () => {
   try {
-    const text = await navigator.clipboard.readText();
+    const text = IN_APP ? AndroidBridge.clipboardText() : await navigator.clipboard.readText();
     if (!text) return toast('클립보드가 비어 있어요. 인스타그램에서 링크를 복사해 주세요.', 'info');
-    $('url').value = text.trim();
+    // 메신저에서 복사한 "이거 봐 https://…"처럼 글이 섞여 있어도 링크만 뽑아 씁니다.
     const link = findLink(text);
     if (link) markSeen(link);
+    $('url').value = link || text.trim();
     lookup($('url').value, null);
   } catch {
     $('url').focus();
@@ -433,6 +458,8 @@ function setCookieState(s) {
   pill.textContent = s.configured ? (SOURCE_LABEL[s.source] || '등록됨') : '없음';
   pill.classList.toggle('on', !!s.configured);
   $('cookieDel').hidden = s.source !== 'app';
+  $('appLogout').hidden = !s.configured;
+  $('appLogin').textContent = s.configured ? '다른 계정으로 다시 로그인' : '인스타그램에 로그인';
 }
 function openSettings() {
   const d = $('settings');
@@ -460,7 +487,7 @@ $('cookieDel').addEventListener('click', async () => {
 api('/api/cookies').then((r) => r.json()).then(setCookieState).catch(() => { $('cookieState').textContent = '—'; });
 $('autosave').checked = store.get('autosave') === '1';
 $('autosave').addEventListener('change', (e) => store.set('autosave', e.target.checked ? '1' : '0'));
-if (!clipboardSupported) {
+if (!clipboardSupported && !IN_APP) {
   $('hint').textContent = '이 주소에서는 클립보드 자동 인식을 쓸 수 없어요 (HTTPS 또는 localhost에서만 가능). 붙여넣기 버튼은 사용할 수 있어요.';
   $('hint').hidden = false;
 }
@@ -468,7 +495,45 @@ if (!handleLaunchParams()) checkClipboard();
 document.addEventListener('visibilitychange', checkClipboard);
 window.addEventListener('focus', checkClipboard);
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if (!IN_APP && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+/* ---------- 안드로이드 앱 전용 연결 ---------- */
+if (IN_APP) {
+  $('webCookie').hidden = true;
+  $('appCookie').hidden = false;
+
+  // 앱이 인스타그램 링크를 찾았을 때(클립보드: 앱을 열 때 / 공유: 인스타그램의 공유 시트에서)
+  window.__nativeLink = (link, source) => {
+    if (source === 'clipboard') {
+      if (seenRecently(link)) return; // 방금 처리한 링크를 앱을 열 때마다 다시 불러오지 않음
+      markSeen(link);
+    }
+    startFrom(link, source === 'share' ? 'share' : 'clipboard');
+  };
+
+  // 저장은 앱이 하고(갤러리), 끝나면 결과를 알려 줍니다.
+  const pendingSaves = new Map();
+  let saveSeq = 0;
+  window.__saved = (id, ok, message) => {
+    const p = pendingSaves.get(id);
+    if (!p) return;
+    pendingSaves.delete(id);
+    if (ok) p.resolve(message); else p.reject(new Error(message));
+  };
+  window.nativeSave = (index) => new Promise((resolve, reject) => {
+    const id = ++saveSeq;
+    pendingSaves.set(id, { resolve, reject });
+    AndroidBridge.save(id, current.url, index || 0);
+  });
+
+  window.__cookieChanged = () => {
+    api('/api/cookies').then((r) => r.json()).then(setCookieState).catch(() => {});
+  };
+  $('appLogin').addEventListener('click', () => AndroidBridge.login());
+  $('appLogout').addEventListener('click', () => {
+    if (confirm('저장된 인스타그램 로그인을 지울까요?')) AndroidBridge.logout();
+  });
+}
 </script>
 </body>
 </html>

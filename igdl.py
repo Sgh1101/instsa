@@ -13,7 +13,7 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 import yt_dlp
@@ -22,6 +22,10 @@ from yt_dlp.utils import DownloadError
 ALLOWED_PAGE_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
 # 미디어 CDN 호스트 접미사. 서버가 임의 주소로 요청을 보내는 것(SSRF)을 막기 위한 허용 목록입니다.
 ALLOWED_MEDIA_SUFFIXES = (".cdninstagram.com", ".fbcdn.net")
+
+# 영상 포맷 선택. 기본은 ffmpeg으로 영상/음성을 합치는 것까지 허용하고, ffmpeg이 없는 환경(안드로이드)에서는
+# "b[ext=mp4]/b"(소리 포함 단일 파일)로 바꿉니다.
+VIDEO_FORMAT = "b[ext=mp4]/b/bv*+ba"
 
 MAX_IMAGE_BYTES = 50 * 1024 * 1024
 USER_AGENT = (
@@ -248,6 +252,34 @@ def get_post(raw_url: str) -> dict:
     }
 
 
+def post_for_ui(raw_url: str) -> dict:
+    """화면에 보여 줄 게시물 정보. 미리보기는 인스타 CDN이 외부 Referer를 막을 수 있어 /api/thumb를 거칩니다."""
+    post = get_post(raw_url)
+    for item in post["items"]:
+        if item["thumbnail"]:
+            item["thumbnail"] = "/api/thumb?" + urlencode({"u": item["thumbnail"]})
+    return post
+
+
+def fetch_thumbnail(url: str) -> tuple[bytes, str]:
+    if not is_allowed_media_url(url):
+        raise IgError("허용되지 않은 주소입니다.", 400)
+    try:
+        upstream = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT, "Referer": "https://www.instagram.com/"},
+            timeout=15,
+            allow_redirects=False,
+        )
+        upstream.raise_for_status()
+    except requests.RequestException:
+        raise IgError("미리보기를 불러오지 못했습니다.", 502)
+    ctype = upstream.headers.get("Content-Type", "image/jpeg")
+    if not ctype.startswith("image/"):
+        raise IgError("이미지가 아닙니다.", 502)
+    return upstream.content, ctype
+
+
 def _download_image(url: str, dest_stem: Path) -> Path:
     if not is_allowed_media_url(url):
         raise IgError("허용되지 않은 이미지 주소입니다.", 502)
@@ -283,7 +315,7 @@ def fetch_post(raw_url: str, dest: Path, only: int | None = None) -> list[tuple[
     dest.mkdir(parents=True, exist_ok=True)
     opts = _opts(
         outtmpl=str(dest / "%(playlist_index|1)s.%(ext)s"),
-        format="b[ext=mp4]/b/bv*+ba",
+        format=VIDEO_FORMAT,
         merge_output_format="mp4",
     )
     if only:

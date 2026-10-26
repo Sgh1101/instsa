@@ -153,36 +153,20 @@ def cookies_delete():
     return jsonify(igdl.cookies_status())
 
 
-@app.post("/api/info")
+@app.route("/api/info", methods=["GET", "POST"])
 def info():
-    body = request.get_json(silent=True) or {}
-    post = igdl.get_post(body.get("url", ""))
-    for item in post["items"]:
-        if item["thumbnail"]:
-            # 인스타 CDN이 외부 Referer를 막을 수 있어 서버를 거쳐 미리보기를 보여줍니다.
-            item["thumbnail"] = "/api/thumb?" + urlencode({"u": item["thumbnail"]})
-    return jsonify(post)
+    # GET이 기본입니다(안드로이드 앱의 WebView는 POST 본문을 가로챌 수 없음). POST는 하위 호환용.
+    if request.method == "GET":
+        url = request.args.get("url", "")
+    else:
+        url = (request.get_json(silent=True) or {}).get("url", "")
+    return jsonify(igdl.post_for_ui(url))
 
 
 @app.get("/api/thumb")
 def thumb():
-    url = request.args.get("u", "")
-    if not igdl.is_allowed_media_url(url):
-        raise IgError("허용되지 않은 주소입니다.", 400)
-    try:
-        upstream = requests.get(
-            url,
-            headers={"User-Agent": igdl.USER_AGENT, "Referer": "https://www.instagram.com/"},
-            timeout=15,
-            allow_redirects=False,
-        )
-        upstream.raise_for_status()
-    except requests.RequestException:
-        raise IgError("미리보기를 불러오지 못했습니다.", 502)
-    ctype = upstream.headers.get("Content-Type", "image/jpeg")
-    if not ctype.startswith("image/"):
-        raise IgError("이미지가 아닙니다.", 502)
-    return Response(upstream.content, content_type=ctype, headers={"Cache-Control": "private, max-age=600"})
+    data, ctype = igdl.fetch_thumbnail(request.args.get("u", ""))
+    return Response(data, content_type=ctype, headers={"Cache-Control": "private, max-age=600"})
 
 
 @app.get("/api/download")

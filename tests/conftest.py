@@ -2,6 +2,7 @@
 
 가짜 Instagram 추출기(FakeIG)가 게시물 정보를 돌려주고, 미디어 파일은 로컬 HTTP 서버가 제공합니다.
 """
+import copy
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,7 +86,9 @@ def fake_instagram(media_server, monkeypatch):
             code = self._match_id(url)
             if code not in posts:
                 raise yt_dlp.utils.ExtractorError("HTTP Error 404: Not Found", expected=True)
-            return posts[code]
+            # 진짜 추출기처럼 매번 새 데이터를 돌려줍니다. yt-dlp는 playlist_items를 처리하면서 받은 딕셔너리의
+            # entries를 제자리에서 잘라 버리므로, 같은 객체를 돌려주면 한 번 부분 저장한 뒤의 조회가 깨집니다.
+            return copy.deepcopy(posts[code])
 
     class FakeYDL(yt_dlp.YoutubeDL):
         def __init__(self, params=None, auto_init=True):
