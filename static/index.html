@@ -321,6 +321,7 @@ async function save(button, index) {
   try {
     if (IN_APP) {
       // 앱: 서버 없이 앱이 직접 받아서 갤러리에 저장합니다.
+      toast('저장 중이에요. 앱을 나가도 계속돼요', 'info', 2500);
       toast(await nativeSave(index), 'info', 2500);
     } else {
       const qs = new URLSearchParams({ url: current.url });

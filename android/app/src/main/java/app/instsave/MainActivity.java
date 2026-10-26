@@ -4,13 +4,9 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.MediaStore;
 import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.WebChromeClient;
@@ -23,16 +19,12 @@ import android.widget.Toast;
 
 import com.chaquo.python.PyObject;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -50,7 +42,6 @@ public class MainActivity extends Activity {
     /** 가상의 주소입니다. 네트워크로 나가지 않고 전부 이 앱이 응답합니다. */
     static final String HOST = "app.local";
     private static final int REQ_LOGIN = 1;
-    private static final String GALLERY_FOLDER = "InstaSave";
 
     private static final Pattern IG_LINK = Pattern.compile(
             "https?://(?:www\\.|m\\.)?instagram\\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reels?|tv)/[A-Za-z0-9_-]+/?(?:\\?[^\\s]*)?",
@@ -78,6 +69,12 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         setContentView(web);
+        // 서비스가 저장을 끝내면 화면(JS)에 알려 토스트를 띄웁니다. 화면이 없으면 서비스가 알림으로 알립니다.
+        SaveService.listener = (id, ok, message) -> {
+            if (!isDestroyed()) {
+                saved(id, ok, message);
+            }
+        };
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -218,7 +215,11 @@ public class MainActivity extends Activity {
     private class Bridge {
         @JavascriptInterface
         public void save(int id, String url, int index) {
-            pool.submit(() -> doSave(id, url, index));
+            runOnUiThread(() -> {
+                askNotificationPermissionOnce();
+                // 서비스가 저장하므로 앱을 나가도 계속됩니다. 앱이 화면에 있는 지금 시작해야 합니다(안드로이드 12+).
+                SaveService.enqueue(MainActivity.this, id, url, index);
+            });
         }
 
         @JavascriptInterface
@@ -255,80 +256,6 @@ public class MainActivity extends Activity {
             pendingLink = link;
             pendingSource = source;
         }
-    }
-
-    // ---- 갤러리 저장 -------------------------------------------------------------
-
-    private void doSave(int id, String url, int index) {
-        File dir = null;
-        try {
-            String json = api.callAttr("save", url, index, getCacheDir().getAbsolutePath()).toString();
-            JSONObject o = new JSONObject(json);
-            if (o.has("error")) {
-                saved(id, false, o.getString("error"));
-                return;
-            }
-            dir = new File(o.getString("dir"));
-            JSONArray files = o.getJSONArray("files");
-            for (int i = 0; i < files.length(); i++) {
-                JSONObject f = files.getJSONObject(i);
-                saveToGallery(new File(f.getString("path")), f.getString("name"), f.getString("mime"));
-            }
-            saved(id, true, files.length() + "개를 갤러리에 저장했어요");
-        } catch (Exception e) {
-            saved(id, false, "저장하지 못했어요: " + e.getMessage());
-        } finally {
-            if (dir != null) {
-                deleteRecursively(dir);
-            }
-        }
-    }
-
-    /** Android 10+ MediaStore: 저장소 권한 없이 갤러리(사진/동영상)에 저장합니다. */
-    private void saveToGallery(File file, String displayName, String mime) throws IOException {
-        boolean video = mime.startsWith("video/");
-        Uri collection = video
-                ? MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                : MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
-        ContentValues values = new ContentValues();
-        values.put(MediaStore.MediaColumns.DISPLAY_NAME, displayName);
-        values.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-        values.put(MediaStore.MediaColumns.RELATIVE_PATH,
-                (video ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES) + "/" + GALLERY_FOLDER);
-        values.put(MediaStore.MediaColumns.IS_PENDING, 1);
-
-        ContentResolver resolver = getContentResolver();
-        Uri uri = resolver.insert(collection, values);
-        if (uri == null) {
-            throw new IOException("갤러리에 파일을 만들지 못했어요");
-        }
-        try (InputStream in = new FileInputStream(file); OutputStream out = resolver.openOutputStream(uri)) {
-            if (out == null) {
-                throw new IOException("갤러리 파일을 열지 못했어요");
-            }
-            byte[] buf = new byte[64 * 1024];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-        } catch (IOException e) {
-            resolver.delete(uri, null, null); // 반쯤 쓴 파일이 갤러리에 남지 않도록
-            throw e;
-        }
-        values.clear();
-        values.put(MediaStore.MediaColumns.IS_PENDING, 0);
-        resolver.update(uri, values, null, null);
-    }
-
-    private static void deleteRecursively(File f) {
-        File[] children = f.listFiles();
-        if (children != null) {
-            for (File c : children) {
-                deleteRecursively(c);
-            }
-        }
-        // 임시 파일 정리라서 실패해도 무시합니다.
-        f.delete();
     }
 
     // ---- 클립보드 / 공유 ---------------------------------------------------------
@@ -387,7 +314,30 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        SaveService.appVisible = true;
+    }
+
+    @Override
+    protected void onStop() {
+        SaveService.appVisible = false;
+        super.onStop();
+    }
+
+    /** 안드로이드 13+는 알림 권한이 필요합니다. 거절해도 저장은 되고, 알림만 안 보입니다. 한 번만 묻습니다. */
+    private void askNotificationPermissionOnce() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return;
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+        android.content.SharedPreferences prefs = getSharedPreferences("app", MODE_PRIVATE);
+        if (prefs.getBoolean("asked_notifications", false)) return;
+        prefs.edit().putBoolean("asked_notifications", true).apply();
+        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 100);
+    }
+
+    @Override
     protected void onDestroy() {
+        SaveService.listener = null;
         pool.shutdown();
         if (web != null) {
             web.destroy();
