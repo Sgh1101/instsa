@@ -4,20 +4,103 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import mimetypes
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 
 import igdl
 from igdl import IgError
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+
+# ---- 접근 제한 (선택) ------------------------------------------------------
+# APP_TOKEN을 지정하면 로그인해야만 쓸 수 있습니다. 인터넷에서 닿는 주소로 열 때는 필수입니다.
+COOKIE_NAME = "igdl_auth"
+COOKIE_MAX_AGE = 90 * 24 * 3600
+PUBLIC_PATHS = {"/login", "/manifest.webmanifest", "/sw.js"}  # 앱 설치에 필요하고 민감 정보가 없는 것들
+PUBLIC_PREFIXES = ("/static/icon",)
+MAX_FAILS, FAIL_WINDOW, FAIL_DELAY = 10, 15 * 60, 1.0
+_fails: list[float] = []  # 계정이 하나뿐이라 IP가 아닌 전역으로 셉니다(프록시 뒤 X-Forwarded-For는 믿을 수 없음)
+
+
+def _token() -> str:
+    return os.environ.get("APP_TOKEN", "")
+
+
+def _sign(token: str, exp: int) -> str:
+    return hmac.new(token.encode(), f"igdl:{exp}".encode(), hashlib.sha256).hexdigest()
+
+
+def _valid_cookie(token: str, value: str) -> bool:
+    try:
+        exp_s, sig = value.split(".", 1)
+        exp = int(exp_s)
+    except ValueError:
+        return False
+    return exp > time.time() and hmac.compare_digest(sig, _sign(token, exp))
+
+
+def _safe_next(target: str | None) -> str:
+    """로그인 뒤 돌아갈 곳. 같은 사이트의 경로만 허용합니다(open redirect 방지)."""
+    if target and target.startswith("/") and not target.startswith("//") and "\\" not in target:
+        return target
+    return "/"
+
+
+def _is_https() -> bool:
+    return request.is_secure or request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip() == "https"
+
+
+@app.before_request
+def require_login():
+    token = _token()
+    if not token or request.path in PUBLIC_PATHS or request.path.startswith(PUBLIC_PREFIXES):
+        return None
+    if _valid_cookie(token, request.cookies.get(COOKIE_NAME, "")):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify(error="로그인이 필요해요.", auth=True), 401  # auth=True: 인스타그램 401과 구분
+    return redirect("/login?" + urlencode({"next": request.full_path.rstrip("?")}))
+
+
+@app.get("/login")
+def login_page():
+    return send_from_directory(app.static_folder, "login.html")
+
+
+@app.post("/login")
+def login_submit():
+    token = _token()
+    nxt = _safe_next(request.form.get("next"))
+    if not token:
+        return redirect(nxt)
+    now = time.time()
+    _fails[:] = [t for t in _fails if now - t < FAIL_WINDOW]
+    if len(_fails) >= MAX_FAILS:
+        return "너무 많이 틀렸어요. 15분 뒤에 다시 시도해 주세요.", 429
+    if not hmac.compare_digest(request.form.get("token", "").encode(), token.encode()):
+        _fails.append(now)
+        time.sleep(FAIL_DELAY)
+        return redirect("/login?" + urlencode({"error": 1, "next": nxt}))
+    exp = int(now) + COOKIE_MAX_AGE
+    resp = redirect(nxt)
+    resp.set_cookie(COOKIE_NAME, f"{exp}.{_sign(token, exp)}", max_age=COOKIE_MAX_AGE,
+                    httponly=True, samesite="Lax", secure=_is_https())
+    return resp
+
+
+if os.environ.get("REQUIRE_APP_TOKEN") == "1" and not _token():
+    # 컨테이너(Dockerfile)가 켜는 안전장치: 토큰 없이 인터넷에 열린 채로 뜨는 사고를 막습니다.
+    raise RuntimeError("APP_TOKEN이 설정되지 않았습니다. 비밀번호를 정해 환경 변수 APP_TOKEN으로 넘겨 주세요.")
 
 
 @app.errorhandler(IgError)
@@ -114,5 +197,11 @@ def download():
 
 
 if __name__ == "__main__":
-    # 기본은 내 컴퓨터에서만 접속됩니다. 쿠키(로그인 정보)를 쓰므로 외부에 공개하지 마세요.
-    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")))
+    # 기본은 내 컴퓨터에서만 접속됩니다.
+    host = os.environ.get("HOST", "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost", "::1") and not _token():
+        raise SystemExit(
+            "HOST가 외부에 열려 있는데 APP_TOKEN이 없습니다. 인스타그램 쿠키를 쓰는 앱이라 누구나 쓸 수 있게 두면 위험해요.\n"
+            '  APP_TOKEN="$(python -c \'import secrets; print(secrets.token_urlsafe(32))\')" 로 비밀번호를 정하고 다시 실행하세요.'
+        )
+    app.run(host=host, port=int(os.environ.get("PORT", "5000")))

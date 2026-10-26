@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python app.py                                        # http://127.0.0.1:5000
 ```
 
-`HOST`, `PORT` 환경 변수로 주소를 바꿀 수 있습니다. **쿠키(로그인 정보)를 쓰므로 `HOST=0.0.0.0` 등으로 외부에 공개하지 마세요.**
+`HOST`, `PORT` 환경 변수로 주소를 바꿀 수 있습니다. 인스타그램 쿠키를 쓰는 앱이라, `HOST`를 외부로 열면 **`APP_TOKEN`(비밀번호) 없이는 시작되지 않습니다.** 폰에서 쓰는 방법은 아래 [내 폰에서 나만 쓰기](#내-폰에서-나만-쓰기)를 보세요.
 
 ## 링크 자동 인식 (복붙하면 바로 뜸)
 
@@ -33,9 +33,61 @@ python app.py                                        # http://127.0.0.1:5000
 복사 단계 없이 인스타그램의 **공유 → 이 앱**으로 보낼 수 있습니다. 이 앱을 홈 화면에 설치(PWA)하면 공유 대상 목록에 나타납니다.
 
 - **안드로이드 Chrome**: 메뉴 → "홈 화면에 추가/앱 설치". 설치 후 인스타그램 공유 시트에 "인스타 저장"이 뜹니다.
-- **iOS**: 공유 대상 등록(Web Share Target)은 지원되지 않아 클립보드/붙여넣기 방식을 쓰세요.
-- 설치와 공유 대상 등록은 **HTTPS(또는 localhost)** 에서만 됩니다. 폰에서 쓰려면 서버를 HTTPS로 노출해야 하며, 이때는 반드시 접근 제한(인증, VPN 등)을 먼저 설계하세요. 이 앱은 인증이 없고 쿠키를 사용합니다.
+- **iOS**: 공유 대상 등록이 되는지는 확인하지 못했습니다(Chrome 문서가 보장하는 것은 안드로이드 Chrome 76 이상). 기대하지 말고 클립보드/붙여넣기 방식을 기본으로 쓰세요.
+- 설치와 공유 대상 등록은 **HTTPS(또는 localhost)** 에서만 됩니다.
 - 어떤 환경에서든 `https://내주소/?url=인스타링크` 로 열면 자동 조회됩니다.
+
+## 내 폰에서 나만 쓰기
+
+이 앱은 **설치형 웹 앱(PWA)** 입니다. 홈 화면에 아이콘이 생기고 주소창 없는 앱 화면으로 열리지만, 앱스토어 앱(APK/IPA)은 아닙니다. 서버(이 코드)는 항상 켜져 있는 곳에서 돌고, 폰은 거기에 접속합니다.
+
+### 권장: 집 컴퓨터 + Docker + Tailscale (안드로이드·아이폰 공통)
+
+[Tailscale](https://tailscale.com/)은 내 기기끼리만 연결되는 사설망(VPN)입니다. 서버를 인터넷에 공개하지 않고 폰에서만 `https://…ts.net` 주소로 접속할 수 있어서, "나만 쓰기"에 가장 알맞습니다. 집/가정용 인터넷 IP는 클라우드 서버 IP보다 인스타그램 제한이 덜한 편으로 알려져 있습니다(일반적으로 알려진 경향이며 직접 비교해 보지는 못했습니다).
+
+1. **비밀번호 만들기**: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. **서버 켜기** (상시 켜 둘 컴퓨터에서):
+   ```bash
+   APP_TOKEN='위에서 만든 비밀번호' docker compose up -d --build
+   ```
+   포트는 그 컴퓨터(127.0.0.1)에만 열립니다. `APP_TOKEN`이 없으면 시작되지 않습니다.
+3. **Tailscale 설치**: 그 컴퓨터와 폰 양쪽에 설치하고 같은 계정으로 로그인합니다. 관리 콘솔에서 MagicDNS와 HTTPS 인증서가 켜져 있어야 합니다(공식 문서 기준 새 tailnet은 기본으로 켜져 있고, 처음 쓸 때 안내가 나옵니다).
+4. **HTTPS로 노출**: 그 컴퓨터에서 `tailscale serve --bg 5000` → `tailscale serve status`에 나온 `https://기기이름.tailnet이름.ts.net` 주소가 내 주소입니다. (명령은 Tailscale 1.52에서 바뀌었으니 안 되면 `tailscale serve --help`를 보세요. [공식 문서](https://tailscale.com/docs/reference/tailscale-cli/serve))
+5. **폰에서**: 그 주소를 열고 비밀번호를 입력 → 브라우저 메뉴의 **"홈 화면에 추가 / 앱 설치"**.
+   - 안드로이드 Chrome: 설치하면 인스타그램의 공유 목록에 "인스타 저장"이 나타납니다.
+   - 아이폰 Safari: 공유 → "홈 화면에 추가". 링크를 복사하고 앱을 열면 "붙여넣기 허용" 확인창이 뜹니다.
+6. 로그인은 90일 유지됩니다. 비밀번호(`APP_TOKEN`)를 바꾸면 모든 기기에서 로그아웃됩니다.
+
+**yt-dlp 업데이트**: 인스타그램이 바뀌면 다운로드가 깨질 수 있습니다. 이럴 땐 `docker compose build --pull --no-cache && docker compose up -d`.
+
+### 안드로이드만 쓴다면: 폰에서 직접 (Termux)
+
+서버를 따로 두지 않고 폰 안에서 돌리는 방법입니다. 폰의 모바일/가정 IP로 접속하고 `localhost`는 HTTPS 없이도 설치·공유 대상 등록이 됩니다. 단, Termux 앱이 실행 중이어야 합니다.
+
+```bash
+# F-Droid 등에서 설치한 Termux 안에서
+pkg install python ffmpeg git
+git clone <이 저장소> && cd instsa && pip install -r requirements.txt
+python app.py        # Chrome에서 http://localhost:5000 → "앱 설치"
+```
+
+### 직접 확인해 본 것 / 못 한 것
+
+| 항목 | 상태 |
+|---|---|
+| 비밀번호 로그인, 로그아웃 상태 차단, 공유 링크로 열었을 때 로그인 후 복귀, 무차별 대입 잠금 | 자동 테스트 + 브라우저로 확인 |
+| 컨테이너와 같은 `gunicorn` 명령으로 다운로드·zip·동시 요청·임시 파일 정리 | 확인 |
+| **Docker 이미지 빌드(`Dockerfile`)** | **못 해 봄** (개발 환경에 Docker 데몬이 없었음) |
+| **Tailscale 연결, 폰에서 설치, 인스타그램 공유 목록 등장** | **못 해 봄** (실제 기기 필요) |
+| Termux 실행 | 못 해 봄 |
+
+## 쿠키가 사실상 필요합니다
+
+인스타그램은 로그인하지 않은(익명) 접근에 횟수 한도를 두고 있어서, 몇 번 쓰면 이런 오류가 납니다.
+
+> You have exceeded the rate-limit for accessing posts anonymously.
+
+그러면 앱은 "로그인이 필요한 게시물이거나 인스타그램이 요청을 제한했습니다"라고 알려 줍니다. 개인용으로 꾸준히 쓰려면 아래 [쿠키 설정](#쿠키-설정-로그인이-필요한-경우)을 하는 것을 권합니다. Docker로 돌릴 때는 `IG_COOKIES_FROM_BROWSER`를 쓸 수 없으므로 `cookies.txt`를 만들어 `docker-compose.yml`의 주석 처리된 부분(`IG_COOKIES_FILE`, `volumes`)을 풀어 주세요.
 
 ## 지원 범위
 

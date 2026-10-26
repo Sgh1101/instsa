@@ -187,7 +187,12 @@ async function api(path, options) {
   const res = await fetch(path, options);
   if (!res.ok) {
     let msg = `요청에 실패했습니다 (${res.status})`;
-    try { msg = (await res.json()).error || msg; } catch {}
+    try {
+      const data = await res.json();
+      msg = data.error || msg;
+      // 로그인 만료. (인스타그램의 401과는 auth 플래그로 구분합니다.)
+      if (data.auth) { location.href = '/login?next=' + encodeURIComponent('/'); }
+    } catch {}
     throw new Error(msg);
   }
   return res;

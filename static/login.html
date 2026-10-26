@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>로그인 · 인스타 다운로더</title>
+<meta name="theme-color" content="#dd2a7b">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<style>
+  :root { --ig: linear-gradient(45deg, #feda75 0%, #fa7e1e 25%, #d62976 55%, #962fbf 78%, #4f5bd5 100%);
+          --btn: linear-gradient(90deg, #d62976 0%, #a02ab5 55%, #5b51d8 100%);
+          --bg: #fafafa; --card: #fff; --text: #262626; --muted: #737373; --line: #dbdbdb; --accent: #d62976;
+          --error: #c1121f; --error-bg: #fff0f1; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --card: #121212; --text: #f5f5f5; --muted: #a8a8a8; --line: #262626; --accent: #ff5a9d;
+            --error: #ff8a93; --error-bg: #2a1013; } }
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
+  form { width: min(380px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 28px 22px;
+         box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06); }
+  .logo { width: 56px; height: 56px; border-radius: 16px; background: var(--ig); display: grid; place-items: center; margin: 0 auto 14px;
+          box-shadow: 0 6px 16px rgba(214,41,118,.28); }
+  .logo svg { width: 30px; height: 30px; }
+  h1 { margin: 0 0 4px; text-align: center; font-size: 1.2rem; letter-spacing: -.02em; }
+  p.sub { margin: 0 0 20px; text-align: center; color: var(--muted); font-size: .86rem; }
+  input[type=password] { width: 100%; padding: 13px 14px; font-size: 16px; border: 1px solid var(--line); border-radius: 14px;
+                         background: transparent; color: var(--text); outline: 0; }
+  input[type=password]:focus { border-color: var(--accent); }
+  button { width: 100%; margin-top: 12px; padding: 14px; border: 0; border-radius: 14px; cursor: pointer; font: inherit; font-weight: 700;
+           font-size: 1.02rem; color: #fff; background: var(--btn); }
+  .err { display: none; margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--error-bg); color: var(--error); font-size: .88rem; }
+  .err.show { display: block; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <div class="logo" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+  </div>
+  <h1>인스타 다운로더</h1>
+  <p class="sub">비밀번호를 입력해 주세요</p>
+  <p id="err" class="err" role="alert">비밀번호가 맞지 않아요.</p>
+  <input type="hidden" name="next" id="next" value="/">
+  <input type="password" name="token" autocomplete="current-password" aria-label="비밀번호" required autofocus>
+  <button type="submit">들어가기</button>
+</form>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.getElementById('next').value = q.get('next') || '/';
+  if (q.get('error')) document.getElementById('err').classList.add('show');
+</script>
+</body>
+</html>
