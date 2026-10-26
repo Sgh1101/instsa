@@ -75,9 +75,9 @@ public class MainActivity extends Activity {
         // 서비스가 저장을 끝내면 화면(JS)에 알려 토스트를 띄웁니다. 화면이 없으면 서비스가 알림으로 알립니다.
         SaveService.listener = new SaveService.Listener() {
             @Override
-            public void onResult(int id, boolean ok, String message) {
+            public void onResult(int id, boolean ok, String message, String detail) {
                 if (!isDestroyed()) {
-                    saved(id, ok, message);
+                    saved(id, ok, message, detail);
                 }
             }
 
@@ -294,6 +294,18 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** 진단 정보 등을 클립보드에 복사합니다(웹뷰의 클립보드 API는 앱 안에서 막혀 있을 수 있어 앱이 직접 합니다). */
+        @JavascriptInterface
+        public void copyText(String text) {
+            runOnUiThread(() -> {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("인스타 저장 진단", text));
+                    Toast.makeText(MainActivity.this, "복사했어요", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
         @JavascriptInterface
         public String clipboardText() {
             return clipboardString();
@@ -304,8 +316,8 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> web.evaluateJavascript(code, null));
     }
 
-    private void saved(int id, boolean ok, String message) {
-        js("window.__saved && window.__saved(" + id + "," + ok + "," + JSONObject.quote(message) + ")");
+    private void saved(int id, boolean ok, String message, String detail) {
+        js("window.__saved && window.__saved(" + id + "," + ok + "," + JSONObject.quote(message) + "," + JSONObject.quote(detail) + ")");
     }
 
     private void deliver(String link, String source) {

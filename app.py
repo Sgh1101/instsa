@@ -114,7 +114,7 @@ if os.environ.get("REQUIRE_APP_TOKEN") == "1" and not _token():
 
 @app.errorhandler(IgError)
 def handle_ig_error(e: IgError):
-    return jsonify(error=e.message), e.status
+    return jsonify(error=e.message, detail=e.detail), e.status
 
 
 @app.get("/")

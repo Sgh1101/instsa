@@ -145,7 +145,7 @@ def test_save_error_carries_status_so_batches_can_stop(fake_instagram, tmp_path,
 
     monkeypatch.setattr(igdl, "fetch_post", limited)
     r = json.loads(android_api.save(CAR, 0, str(tmp_path), False))
-    assert r == {"error": "제한", "status": 429}
+    assert r == {"error": "제한", "status": 429, "detail": ""}
 
 
 def test_profiles_through_handle_and_remove():

@@ -43,10 +43,11 @@ _IMAGE_EXT = {"image/jpeg": ".jpg", "image/webp": ".webp", "image/png": ".png"}
 class IgError(Exception):
     """사용자에게 그대로 보여줄 수 있는 오류."""
 
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, status: int = 400, detail: str = ""):
         super().__init__(message)
         self.message = message
         self.status = status
+        self.detail = detail  # 진단용 원문(yt-dlp가 돌려준 메시지 등). 화면의 '자세히'에만 보입니다.
 
 
 @dataclass
@@ -253,16 +254,18 @@ def _translate(message: str) -> IgError:
             "인스타그램이 요청을 일시적으로 제한했어요. 몇 분 뒤에 다시 시도해 주세요. "
             "자주 생기면 화면 맨 아래 '인스타그램 로그인 설정'에서 쿠키를 등록해 보세요.",
             429,
+            msg,
         )
     if any(k in low for k in ("login", "log in", "cookies", "rate-limit", "empty media response")):
         return IgError(
             "로그인이 필요한 게시물이거나 인스타그램이 요청을 제한했습니다. "
             "화면 맨 아래 '인스타그램 로그인 설정'에서 쿠키를 등록해 주세요.",
             401,
+            msg,
         )
     if "404" in low or "not found" in low or "unavailable" in low:
-        return IgError("게시물을 찾을 수 없습니다. 삭제되었거나 주소가 잘못되었을 수 있습니다.", 404)
-    return IgError(f"가져오지 못했습니다: {msg}", 502)
+        return IgError("게시물을 찾을 수 없습니다. 삭제되었거나 주소가 잘못되었을 수 있습니다.", 404, msg)
+    return IgError(f"가져오지 못했습니다: {msg}", 502, msg)
 
 
 def _entries(info: dict) -> list[dict]:

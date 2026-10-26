@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SaveService extends Service {
     /** 화면이 떠 있을 때 결과를 화면(JS)으로 돌려주는 통로. 화면이 없으면 null. */
     interface Listener {
-        void onResult(int id, boolean ok, String message);
+        void onResult(int id, boolean ok, String message, String detail);
 
         void onBatch(int batch, int done, int total, int saved, int skipped, int failed, boolean stopped,
                      boolean finished, String message);
@@ -53,6 +53,7 @@ public class SaveService extends Service {
         boolean lastWasNetwork; // 직전 항목이 인스타그램에 요청했는가(했으면 다음 항목 전에 간격을 둠)
         Uri lastUri;
         String lastMime;
+        String firstError;      // 처음 실패한 항목의 원인(요약에 붙여 줌)
 
         Batch(int total) {
             this.total = total;
@@ -142,7 +143,7 @@ public class SaveService extends Service {
         try {
             r = execute(url, index, batch, skipSaved);
         } catch (Throwable t) {
-            r = Saver.Result.failed("저장하지 못했어요: " + t.getMessage(), 0);
+            r = Saver.Result.failed("저장하지 못했어요: " + t.getMessage(), 0, t.toString());
         } finally {
             if (wakeLock.isHeld()) {
                 wakeLock.release();
@@ -154,7 +155,7 @@ public class SaveService extends Service {
         } else {
             Listener l = listener;
             if (l != null) {
-                l.onResult(id, r.ok, r.message);
+                l.onResult(id, r.ok, r.message, r.detail);
             }
             if (!appVisible) {
                 notifyDone(100 + id, r.ok ? "저장 완료" : "저장 실패", r.message, r.ok, r.lastUri, r.lastMime);
@@ -218,6 +219,9 @@ public class SaveService extends Service {
             } else {
                 b.failed++;
                 b.lastWasNetwork = true;
+                if (b.firstError == null) {
+                    b.firstError = r.message;
+                }
                 if (r.shouldStopBatch()) {
                     b.stopped = true; // 계속하면 계정만 더 막히므로 남은 항목은 실행하지 않음
                 }
@@ -229,7 +233,7 @@ public class SaveService extends Service {
             failed = b.failed;
             stopped = b.stopped;
         }
-        String message = summary(saved, skipped, failed, stopped, b.total);
+        String message = summary(saved, skipped, failed, stopped, b.firstError);
         Listener l = listener;
         if (l != null) {
             l.onBatch(batch, done, b.total, saved, skipped, failed, stopped, finished, message);
@@ -242,11 +246,12 @@ public class SaveService extends Service {
         }
     }
 
-    private static String summary(int saved, int skipped, int failed, boolean stopped, int total) {
+    private static String summary(int saved, int skipped, int failed, boolean stopped, String firstError) {
         StringBuilder sb = new StringBuilder();
         sb.append(saved).append("개 저장");
         if (skipped > 0) sb.append(", ").append(skipped).append("개는 이미 받아서 건너뜀");
         if (failed > 0) sb.append(", ").append(failed).append("개 실패");
+        if (failed > 0 && firstError != null) sb.append(" (원인: ").append(firstError).append(")");
         if (stopped) {
             sb.append(". 인스타그램이 요청을 제한하거나 로그인이 필요해서 남은 항목은 멈췄어요. 잠시 뒤 다시 시도해 주세요.");
         }

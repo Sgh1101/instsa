@@ -30,8 +30,10 @@ final class Saver {
         final int status;      // 실패 원인 코드(429: 요청 제한, 401: 로그인 필요 등). 없으면 0
         final boolean skipped; // 이미 받은 게시물이라 건너뜀(인스타그램에 요청하지 않음)
         final boolean cancelled; // 앞선 실패로 묶음이 중단되어 실행하지 않음
+        final String detail;   // 실패 원인의 원문(진단용). 화면의 '자세히'에 보입니다
 
-        Result(boolean ok, String message, Uri lastUri, String lastMime, int status, boolean skipped, boolean cancelled) {
+        Result(boolean ok, String message, Uri lastUri, String lastMime, int status, boolean skipped, boolean cancelled,
+               String detail) {
             this.ok = ok;
             this.message = message;
             this.lastUri = lastUri;
@@ -39,22 +41,23 @@ final class Saver {
             this.status = status;
             this.skipped = skipped;
             this.cancelled = cancelled;
+            this.detail = detail == null ? "" : detail;
         }
 
         static Result ok(String message, Uri uri, String mime) {
-            return new Result(true, message, uri, mime, 0, false, false);
+            return new Result(true, message, uri, mime, 0, false, false, "");
         }
 
-        static Result failed(String message, int status) {
-            return new Result(false, message, null, null, status, false, false);
+        static Result failed(String message, int status, String detail) {
+            return new Result(false, message, null, null, status, false, false, detail);
         }
 
         static Result skipped() {
-            return new Result(true, "이미 저장한 게시물이라 건너뛰었어요", null, null, 0, true, false);
+            return new Result(true, "이미 저장한 게시물이라 건너뛰었어요", null, null, 0, true, false, "");
         }
 
         static Result cancelled() {
-            return new Result(false, "앞선 오류로 멈췄어요", null, null, 0, false, true);
+            return new Result(false, "앞선 오류로 멈췄어요", null, null, 0, false, true, "");
         }
 
         /** 요청 제한이거나 로그인이 필요해서, 같은 묶음의 나머지를 계속하면 계정만 더 막힐 상황. */
@@ -79,7 +82,7 @@ final class Saver {
                 return Result.skipped();
             }
             if (o.has("error")) {
-                return Result.failed(o.getString("error"), o.optInt("status", 0));
+                return Result.failed(o.getString("error"), o.optInt("status", 0), o.optString("detail"));
             }
             dir = new File(o.getString("dir"));
             JSONArray files = o.getJSONArray("files");
@@ -97,7 +100,14 @@ final class Saver {
             }
             return Result.ok(files.length() + "개를 갤러리에 저장했어요", last, lastMime);
         } catch (Exception e) {
-            return Result.failed("저장하지 못했어요: " + e.getMessage(), 0);
+            // 갤러리 저장 실패 등 자바 쪽 오류도 파이썬의 '최근 오류' 기록에 남겨 진단에서 함께 보이게 합니다.
+            String detail = e.toString();
+            try {
+                PyHost.api(context).callAttr("log_error", "저장", url, "저장하지 못했어요", detail);
+            } catch (Exception ignored) {
+                // 기록은 부가 기능이라 실패해도 무시
+            }
+            return Result.failed("저장하지 못했어요: " + e.getMessage(), 0, detail);
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);

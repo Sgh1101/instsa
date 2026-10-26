@@ -110,10 +110,13 @@ def test_cookie_roundtrip(fake_instagram):
     assert body(android_api.handle("GET", "/api/cookies", ""))[2]["configured"] is False
 
 
-def test_unexpected_exception_does_not_leak_details(fake_instagram, monkeypatch):
+def test_unexpected_exception_is_explained_in_detail_not_in_the_message(fake_instagram, monkeypatch):
+    # 내 폰 안의 앱이라 오류 원인을 숨길 이유가 없습니다. 메시지는 쉬운 말로, 원인은 detail('자세히')로 보여 줍니다.
     def boom(_):
         raise RuntimeError("secret internal path /data/x")
 
     monkeypatch.setattr(igdl, "post_for_ui", boom)
     status, _, data = body(android_api.handle("GET", "/api/info", "url=x"))
-    assert status == 500 and "secret" not in json.dumps(data)
+    assert status == 500
+    assert "secret" not in data["error"] and "자세히" in data["error"]
+    assert data["detail"] == "RuntimeError: secret internal path /data/x"

@@ -108,6 +108,15 @@
            border: 1px solid var(--error); font-size: .9rem; transition: .25s; z-index: 10; }
   #toast.show { transform: translate(-50%, 0); opacity: 1; }
   #toast.info { background: var(--card); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
+  /* 오류 카드: 토스트는 5초 만에 사라져서 원인을 못 볼 수 있으므로, 닫을 때까지 남는 카드로 보여 줍니다 */
+  .errbox { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--error-bg); color: var(--error); border: 1px solid var(--error); }
+  .errbox b { display: block; margin-bottom: 6px; }
+  .errbox summary { cursor: pointer; font-size: .85rem; margin-bottom: 6px; }
+  .errbox pre { margin: 0 0 8px; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+                font-size: .72rem; line-height: 1.45; border-radius: 8px; background: rgba(0,0,0,.06); color: var(--text); user-select: text; }
+  .errbox .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .errbox .btn { padding: 8px 12px; font-size: .85rem; }
+
   /* 링크 묶음 */
   .batch { padding: 14px; }
   .batch-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
@@ -180,6 +189,16 @@
   <label class="auto"><input id="autosave" type="checkbox"> 링크를 인식하면 바로 저장</label>
   <p id="hint" class="hint" hidden></p>
 
+  <div id="errorBox" class="errbox" role="alert" hidden>
+    <b id="errorTitle"></b>
+    <details id="errorMore"><summary>자세히</summary><pre id="errorDetail"></pre></details>
+    <div class="row">
+      <button id="errDiag" class="btn soft" type="button" hidden>진단하기</button>
+      <button id="errCopy" class="btn soft" type="button">복사</button>
+      <button id="errClose" class="btn soft" type="button">닫기</button>
+    </div>
+  </div>
+
   <article id="batch" class="post batch" hidden>
     <div class="batch-head"><b id="batchTitle"></b><span id="batchSub" class="meta"></span></div>
     <ul id="batchList" class="batch-list"></ul>
@@ -235,6 +254,8 @@
           <button id="appLogin" class="btn primary" type="button">인스타그램에 로그인</button>
           <button id="appLogout" class="btn soft" type="button" hidden>로그인 해제</button>
         </div>
+        <p style="margin-top:12px">저장이 안 될 때는 아래 버튼으로 원인을 확인할 수 있어요. 결과를 복사해서 보내 주세요.</p>
+        <div class="row"><button id="diagBtn" class="btn soft" type="button">문제 진단</button></div>
       </div>
       <p class="warn">쿠키는 내 계정의 로그인 권한과 같아요. <b>부계정</b>을 쓰고 다른 사람에게 보내지 마세요. 저장된 값은 이 앱의 서버에만 있고 화면에 다시 보여주지 않아요. 인스타그램에서 로그아웃하면 쿠키는 무효가 됩니다.</p>
     </div>
@@ -291,16 +312,56 @@ async function api(path, options) {
   const res = await fetch(path, options);
   if (!res.ok) {
     let msg = `요청에 실패했습니다 (${res.status})`;
+    let detail = '';
     try {
       const data = await res.json();
       msg = data.error || msg;
+      detail = data.detail || '';
       // 로그인 만료. (인스타그램의 401과는 auth 플래그로 구분합니다.)
       if (data.auth) { location.href = '/login?next=' + encodeURIComponent('/'); }
     } catch {}
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), { detail });
   }
   return res;
 }
+
+/* ---------- 오류 카드 / 진단 ---------- */
+let errorUrl = '';
+function showError(message, detail, url) {
+  errorUrl = url || '';
+  $('errorTitle').textContent = message;
+  $('errorDetail').textContent = detail || '';
+  $('errorMore').hidden = !detail;
+  $('errorMore').open = false;
+  $('errDiag').hidden = !IN_APP;
+  $('errorBox').hidden = false;
+}
+function hideError() { $('errorBox').hidden = true; }
+function copyText(text) {
+  if (IN_APP) { AndroidBridge.copyText(text); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => toast('복사했어요', 'info', 1500)).catch(() => toast('복사하지 못했어요. 글자를 길게 눌러 복사해 주세요.'));
+  } else {
+    toast('이 주소에서는 복사 버튼을 쓸 수 없어요. 글자를 길게 눌러 복사해 주세요.');
+  }
+}
+async function runDiagnosis(url) {
+  errorUrl = url || errorUrl;
+  const btn = $('errDiag');
+  btn.disabled = true; btn.textContent = '진단 중…';
+  try {
+    const text = (await (await api('/api/diag?url=' + encodeURIComponent(errorUrl))).json()).text;
+    $('errorTitle').textContent = '진단 결과 (복사해서 보내 주세요)';
+    $('errorDetail').textContent = text;
+    $('errorMore').hidden = false; $('errorMore').open = true;
+    $('errDiag').hidden = false;
+    $('errorBox').hidden = false;
+  } catch (e) { toast(e.message); }
+  finally { btn.disabled = false; btn.textContent = '진단하기'; }
+}
+$('errClose').addEventListener('click', hideError);
+$('errCopy').addEventListener('click', () => copyText([$('errorTitle').textContent, $('errorDetail').textContent].filter(Boolean).join('\n')));
+$('errDiag').addEventListener('click', () => runDiagnosis());
 
 /* ---------- 렌더링 ---------- */
 function render(post) {
@@ -388,6 +449,7 @@ async function save(button, index) {
   const html = button.innerHTML;
   button.disabled = true;
   button.innerHTML = button.classList.contains('round') ? ICON_SPIN : ICON_SPIN + '<span>받는 중…</span>';
+  hideError();
   try {
     if (IN_APP) {
       // 앱: 서버 없이 앱이 직접 받아서 갤러리에 저장합니다.
@@ -400,6 +462,7 @@ async function save(button, index) {
     loadProfiles();
   } catch (e) {
     toast(e.message);
+    showError(e.message, e.detail, current && current.url);
   } finally {
     button.disabled = false;
     button.innerHTML = html;
@@ -490,6 +553,7 @@ async function lookup(raw, source) {
   if (busy) return;
   busy = true;
   mode = 'post';
+  hideError();
   $('go').disabled = true;
   $('post').hidden = true;
   $('batch').hidden = true;
@@ -505,6 +569,7 @@ async function lookup(raw, source) {
   } catch (e) {
     setDetect(null);
     toast(e.message);
+    showError(e.message, e.detail, raw);
     if (e.message.includes('쿠키')) openSettings(); // 로그인이 필요하다는 오류면 설정 칸을 바로 열어 줍니다
   } finally {
     busy = false;
@@ -724,6 +789,7 @@ if (IN_APP) {
       activeBatch = null;
       if (mode === 'batch') $('main').disabled = false; // 지금 묶음 화면일 때만(낱개 저장 중인 버튼은 건드리지 않음)
       toast(message, stopped || failed ? 'error' : 'info', 7000);
+      if (stopped || failed) showError(message, '', batchLinks[0]); // 원인은 message에 들어 있고, 진단 버튼으로 더 볼 수 있음
       loadProfiles();
     }
   };
@@ -732,12 +798,20 @@ if (IN_APP) {
   // 저장은 앱이 하고(갤러리), 끝나면 결과를 알려 줍니다.
   const pendingSaves = new Map();
   let saveSeq = 0;
-  window.__saved = (id, ok, message) => {
+  window.__saved = (id, ok, message, detail) => {
     const p = pendingSaves.get(id);
     if (!p) return;
     pendingSaves.delete(id);
-    if (ok) p.resolve(message); else p.reject(new Error(message));
+    if (ok) p.resolve(message); else p.reject(Object.assign(new Error(message), { detail: detail || '' }));
   };
+  $('diagBtn').addEventListener('click', () => {
+    $('errorTitle').textContent = '진단 중…';
+    $('errorDetail').textContent = '';
+    $('errorMore').hidden = true;
+    $('errorBox').hidden = false;
+    runDiagnosis(current && current.url);
+    $('errorBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
   window.nativeSave = (index) => new Promise((resolve, reject) => {
     const id = ++saveSeq;
     pendingSaves.set(id, { resolve, reject });
