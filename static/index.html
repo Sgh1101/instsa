@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>인스타 다운로더</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #fff; --text: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #c13584; --accent-text: #fff; --error: #b91c1c; --error-bg: #fef2f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111; --card: #1c1c1e; --text: #f3f4f6; --muted: #9ca3af; --line: #2f2f33;
+            --accent: #e1558f; --error: #fca5a5; --error-bg: #3b1515; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 -apple-system, "Pretendard", "Noto Sans KR", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: .9rem; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=url], input[type=text] { flex: 1 1 260px; min-width: 0; padding: 12px 14px; font-size: 1rem;
+         border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+  button { padding: 12px 18px; font-size: 1rem; border: 0; border-radius: 10px; cursor: pointer;
+           background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button:disabled { opacity: .55; cursor: progress; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 8px 12px; font-size: .9rem;
+                 flex-shrink: 0; white-space: nowrap; }
+  #status { margin-top: 16px; padding: 12px 14px; border-radius: 10px; display: none; }
+  #status.error { display: block; background: var(--error-bg); color: var(--error); }
+  #status.info { display: block; color: var(--muted); }
+  #result { margin-top: 24px; display: none; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+  .meta b { display: block; }
+  .caption { color: var(--muted); font-size: .9rem; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .thumb { position: relative; aspect-ratio: 1; background: var(--line); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.65); color: #fff; font-size: .75rem;
+           padding: 2px 8px; border-radius: 999px; }
+  .card .row { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .card small { color: var(--muted); }
+  footer { margin-top: 40px; color: var(--muted); font-size: .8rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>인스타 다운로더</h1>
+  <p class="sub">게시물·릴스 주소를 붙여 넣으면 사진과 영상을 내려받을 수 있어요.</p>
+
+  <form id="form">
+    <input id="url" type="url" required placeholder="https://www.instagram.com/p/…  또는  /reel/…" autocomplete="off" autofocus>
+    <button id="fetch" type="submit">조회</button>
+  </form>
+
+  <div id="status" role="status"></div>
+
+  <section id="result">
+    <div class="head">
+      <div class="meta"><b id="who"></b><div id="caption" class="caption"></div></div>
+      <button id="all" class="ghost" type="button">전체 받기</button>
+    </div>
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <footer>본인이 올렸거나 저작권자의 허락을 받은 콘텐츠만 내려받으세요. 인스타그램 이용약관과 저작권은 사용자 책임입니다.</footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null; // 마지막으로 조회한 게시물
+
+function setStatus(kind, text) {
+  const el = $('status');
+  el.className = kind || '';
+  el.textContent = text || '';
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let msg = `요청에 실패했습니다 (${res.status})`;
+    try { msg = (await res.json()).error || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  return res;
+}
+
+function render(post) {
+  current = post;
+  $('who').textContent = post.uploader ? `@${post.uploader}` : (post.title || '');
+  $('caption').textContent = post.caption || '';
+  const grid = $('grid');
+  grid.replaceChildren();
+  for (const item of post.items) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    if (item.thumbnail) {
+      const img = document.createElement('img');
+      img.src = item.thumbnail;
+      img.alt = `${item.index}번 미리보기`;
+      img.loading = 'lazy';
+      thumb.append(img);
+    }
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = item.kind === 'video'
+      ? `영상${item.duration ? ' ' + Math.round(item.duration) + '초' : ''}` : '사진';
+    thumb.append(badge);
+
+    const row = document.createElement('div');
+    row.className = 'row';
+    const label = document.createElement('small');
+    label.textContent = `${item.index}번` + (item.width ? ` · ${item.width}×${item.height}` : '');
+    const btn = document.createElement('button');
+    btn.className = 'ghost';
+    btn.textContent = '다운로드';
+    btn.addEventListener('click', () => download(btn, item.index));
+    row.append(label, btn);
+
+    card.append(thumb, row);
+    grid.append(card);
+  }
+  // 항목이 하나뿐이면 카드의 다운로드 버튼과 중복되므로 전체 받기는 숨깁니다.
+  $('all').style.display = post.items.length > 1 ? '' : 'none';
+  $('all').textContent = `전체 받기 (zip, ${post.items.length}개)`;
+  $('result').style.display = 'block';
+}
+
+async function download(button, index) {
+  if (!current) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = '받는 중…';
+  setStatus('info', '인스타그램에서 내려받는 중입니다. 영상은 조금 걸릴 수 있어요.');
+  try {
+    const qs = new URLSearchParams({ url: current.url });
+    if (index) qs.set('index', index);
+    const res = await api('/api/download?' + qs);
+    const blob = await res.blob();
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? decodeURIComponent(m[1]) : 'instagram';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    setStatus('', '');
+  } catch (e) {
+    setStatus('error', e.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+$('form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = $('fetch');
+  btn.disabled = true;
+  $('result').style.display = 'none';
+  setStatus('info', '게시물을 조회하는 중…');
+  try {
+    const res = await api('/api/info', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: $('url').value }),
+    });
+    render(await res.json());
+    setStatus('', '');
+  } catch (e) {
+    setStatus('error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('all').addEventListener('click', (ev) => download(ev.currentTarget, null));
+</script>
+</body>
+</html>
