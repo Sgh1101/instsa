@@ -8,8 +8,9 @@ services:
       - "127.0.0.1:5000:5000"
     environment:
       APP_TOKEN: ${APP_TOKEN:?APP_TOKEN을 정해 주세요 (예: APP_TOKEN=$(python3 -c "import secrets;print(secrets.token_urlsafe(32))"))}
-    # 로그인이 필요한 게시물을 받으려면 cookies.txt를 만든 뒤 아래 두 줄의 주석을 풀어 주세요.
-    # (파일이 없는 채로 켜면 Docker가 같은 이름의 '폴더'를 만들어 버리니 먼저 만들어 두세요.)
-    #   environment 쪽:  IG_COOKIES_FILE: /run/cookies.txt
-    #   volumes:
-    #     - ./cookies.txt:/run/cookies.txt:ro
+    volumes:
+      # 앱 화면 맨 아래 '인스타그램 로그인 설정'에서 등록한 쿠키가 여기에 저장됩니다.
+      - igdl-data:/data
+
+volumes:
+  igdl-data:

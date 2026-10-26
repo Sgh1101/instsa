@@ -6,8 +6,10 @@
 """
 from __future__ import annotations
 
+import http.cookiejar
 import os
 import re
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,17 +90,83 @@ def _opts(**extra) -> dict:
         "socket_timeout": 20,
         "retries": 2,
     }
-    if cookie_file := os.environ.get("IG_COOKIES_FILE"):
-        opts["cookiefile"] = cookie_file
     if browser := os.environ.get("IG_COOKIES_FROM_BROWSER"):
         opts["cookiesfrombrowser"] = (browser,)
     opts.update(extra)
     return opts
 
 
+# ---- 로그인 쿠키 -----------------------------------------------------------
+# yt-dlp는 `sessionid` 쿠키가 있으면 로그인한 것으로 봅니다(extractor/instagram.py). 값은 저장만 하고
+# 절대 응답으로 돌려주지 않습니다.
+_SESSIONID_RE = re.compile(r"^[A-Za-z0-9%:_.\-]{16,512}$")
+_CSRF_RE = re.compile(r"^[A-Za-z0-9]{16,128}$")
+
+
+def data_dir() -> Path:
+    return Path(os.environ.get("IGDL_DATA_DIR") or Path.home() / ".igdl")
+
+
+def _stored_cookie_file() -> Path:
+    return data_dir() / "cookies.txt"
+
+
+def _cookie_file() -> Path | None:
+    """IG_COOKIES_FILE(직접 지정)이 우선, 없으면 앱에서 등록한 파일."""
+    if env := os.environ.get("IG_COOKIES_FILE"):
+        return Path(env)
+    stored = _stored_cookie_file()
+    return stored if stored.is_file() else None
+
+
+def cookies_status() -> dict:
+    if os.environ.get("IG_COOKIES_FILE"):
+        return {"configured": True, "source": "env"}
+    if os.environ.get("IG_COOKIES_FROM_BROWSER"):
+        return {"configured": True, "source": "browser"}
+    return {"configured": _stored_cookie_file().is_file(), "source": "app" if _stored_cookie_file().is_file() else None}
+
+
+def save_cookies(sessionid: str, csrftoken: str = "") -> None:
+    sessionid = (sessionid or "").strip().removeprefix("sessionid=").rstrip(";").strip()
+    csrftoken = (csrftoken or "").strip().removeprefix("csrftoken=").rstrip(";").strip()
+    if not _SESSIONID_RE.match(sessionid):
+        raise IgError("sessionid 형식이 올바르지 않아요. 브라우저 쿠키에서 sessionid의 값만 그대로 복사해 주세요.")
+    if csrftoken and not _CSRF_RE.match(csrftoken):
+        raise IgError("csrftoken 형식이 올바르지 않아요. 비워 두어도 됩니다.")
+    expiry = int(time.time()) + 365 * 24 * 3600
+    lines = ["# Netscape HTTP Cookie File", f"#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t{expiry}\tsessionid\t{sessionid}"]
+    if csrftoken:
+        lines.append(f".instagram.com\tTRUE\t/\tTRUE\t{expiry}\tcsrftoken\t{csrftoken}")
+    path = _stored_cookie_file()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # 다른 사용자가 읽지 못하게
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, path)
+
+
+def clear_cookies() -> None:
+    _stored_cookie_file().unlink(missing_ok=True)
+
+
+def _ydl(opts: dict) -> yt_dlp.YoutubeDL:
+    """쿠키를 읽기 전용으로 불러온 YoutubeDL. (cookiefile 옵션은 종료 때 파일에 다시 써서
+    동시 요청이 파일을 깨뜨릴 수 있으므로 쓰지 않습니다.)"""
+    ydl = yt_dlp.YoutubeDL(opts)
+    path = _cookie_file()
+    if path:
+        try:
+            ydl.cookiejar.load(str(path), ignore_discard=True, ignore_expires=True)
+        except (OSError, http.cookiejar.LoadError) as e:
+            raise IgError(f"저장된 쿠키 파일을 읽지 못했어요. 다시 등록해 주세요. ({e.__class__.__name__})", 500) from e
+    return ydl
+
+
 def _extract(url: str, opts: dict, download: bool) -> dict:
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _ydl(opts) as ydl:
             info = ydl.extract_info(url, download=download)
     except DownloadError as e:
         raise _translate(str(e)) from e
@@ -113,13 +181,13 @@ def _translate(message: str) -> IgError:
     if "429" in low or "too many requests" in low:
         return IgError(
             "인스타그램이 요청을 일시적으로 제한했어요. 몇 분 뒤에 다시 시도해 주세요. "
-            "자주 생기면 쿠키 설정을 해 보세요 (README의 '쿠키 설정' 참고).",
+            "자주 생기면 화면 맨 아래 '인스타그램 로그인 설정'에서 쿠키를 등록해 보세요.",
             429,
         )
     if any(k in low for k in ("login", "log in", "cookies", "rate-limit", "empty media response")):
         return IgError(
             "로그인이 필요한 게시물이거나 인스타그램이 요청을 제한했습니다. "
-            "비공개 계정 게시물이나 제한된 게시물은 쿠키 설정이 필요합니다 (README의 '쿠키 설정' 참고).",
+            "화면 맨 아래 '인스타그램 로그인 설정'에서 쿠키를 등록해 주세요.",
             401,
         )
     if "404" in low or "not found" in low or "unavailable" in low:
@@ -223,7 +291,7 @@ def fetch_post(raw_url: str, dest: Path, only: int | None = None) -> list[tuple[
 
     results = []
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with _ydl(opts) as ydl:
             # download=True로 한 번에 받으면 사진 항목(포맷 없음)에서 "No video formats found!"로
             # 실패하므로, 정보만 추출한 뒤 영상 항목에만 다운로드를 수행합니다.
             info = ydl.extract_info(url, download=False)

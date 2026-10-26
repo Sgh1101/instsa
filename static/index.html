@@ -108,6 +108,23 @@
            border: 1px solid var(--error); font-size: .9rem; transition: .25s; z-index: 10; }
   #toast.show { transform: translate(-50%, 0); opacity: 1; }
   #toast.info { background: var(--card); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
+  /* 로그인 설정 */
+  .settings { margin-top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+  .settings summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+                      padding: 14px 16px; font-weight: 700; }
+  .settings summary::-webkit-details-marker { display: none; }
+  .pill { font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--fill); color: var(--muted); }
+  .pill.on { background: var(--btn); color: #fff; }
+  .settings-body { padding: 0 16px 16px; color: var(--muted); font-size: .86rem; }
+  .settings-body p { margin: 0 0 10px; }
+  .settings-body ol { margin: 0 0 12px; padding-left: 20px; }
+  .settings-body b { color: var(--text); }
+  .settings input { display: block; width: 100%; margin-bottom: 8px; padding: 12px 14px; font-size: 16px; border: 1px solid var(--line);
+                    border-radius: 12px; background: transparent; color: var(--text); outline: 0; }
+  .settings input:focus { border-color: var(--accent); }
+  .settings .row { display: flex; gap: 8px; }
+  .settings .row .btn { flex: 1; }
+  .settings .warn { margin-top: 12px; font-size: .8rem; }
   footer { margin: 28px 4px 0; color: var(--muted); font-size: .76rem; line-height: 1.5; text-align: center; }
   [hidden] { display: none !important; }
   .spin { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
@@ -129,7 +146,7 @@
   <div id="detect" class="detect" hidden><span class="dot"></span><span id="detectText"></span></div>
 
   <form id="form" class="search" autocomplete="off">
-    <input id="url" type="text" inputmode="url" enterkeyhint="go" placeholder="인스타그램 링크 붙여넣기" aria-label="인스타그램 링크">
+    <input id="url" type="text" inputmode="url" enterkeyhint="go" placeholder="인스타 링크" aria-label="인스타그램 링크">
     <button id="paste" class="btn soft" type="button">붙여넣기</button>
     <button id="go" class="btn primary" type="submit">조회</button>
   </form>
@@ -152,6 +169,27 @@
     <p id="caption" class="caption" title="눌러서 펼치기"></p>
   </article>
   <div id="dock" class="dock" hidden><button id="main" class="btn primary block" type="button"></button></div>
+
+  <details id="settings" class="settings">
+    <summary><span>인스타그램 로그인 설정</span><span id="cookieState" class="pill">확인 중</span></summary>
+    <div class="settings-body">
+      <p>로그인 없이 쓰면 인스타그램이 몇 번 이용한 뒤 요청을 막아요. 쿠키를 등록하면 막힘이 줄고, 내가 팔로우 중인 비공개 계정 게시물도 받을 수 있어요.</p>
+      <ol>
+        <li>PC 브라우저에서 인스타그램에 로그인</li>
+        <li><b>F12</b> → <b>Application(애플리케이션)</b> → <b>Cookies</b> → instagram.com</li>
+        <li><b>sessionid</b>의 값(Value)을 복사해 아래에 붙여넣기 (폰으로는 "나에게 보내기"로 전달)</li>
+      </ol>
+      <form id="cookieForm" autocomplete="off">
+        <input id="sessionid" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sessionid 값" aria-label="sessionid 값">
+        <input id="csrftoken" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="csrftoken 값 (선택)" aria-label="csrftoken 값 (선택)">
+        <div class="row">
+          <button class="btn primary" type="submit">저장</button>
+          <button id="cookieDel" class="btn soft" type="button" hidden>삭제</button>
+        </div>
+      </form>
+      <p class="warn">쿠키는 내 계정의 로그인 권한과 같아요. <b>부계정</b>을 쓰고 다른 사람에게 보내지 마세요. 저장된 값은 이 앱의 서버에만 있고 화면에 다시 보여주지 않아요. 인스타그램에서 로그아웃하면 쿠키는 무효가 됩니다.</p>
+    </div>
+  </details>
 
   <footer>본인이 올렸거나 저작권자의 허락을 받은 콘텐츠만 저장하세요.<br>이용약관·저작권에 대한 책임은 사용자에게 있습니다.</footer>
 </main>
@@ -307,6 +345,7 @@ async function lookup(raw, source) {
   } catch (e) {
     setDetect(null);
     toast(e.message);
+    if (e.message.includes('쿠키')) openSettings(); // 로그인이 필요하다는 오류면 설정 칸을 바로 열어 줍니다
   } finally {
     busy = false;
     $('go').disabled = false;
@@ -387,7 +426,38 @@ function handleLaunchParams() {
   return startFrom(text, 'share');
 }
 
+/* ---------- 로그인 쿠키 설정 ---------- */
+const SOURCE_LABEL = { app: '등록됨', env: '등록됨 (서버 설정)', browser: '등록됨 (브라우저)' };
+function setCookieState(s) {
+  const pill = $('cookieState');
+  pill.textContent = s.configured ? (SOURCE_LABEL[s.source] || '등록됨') : '없음';
+  pill.classList.toggle('on', !!s.configured);
+  $('cookieDel').hidden = s.source !== 'app';
+}
+function openSettings() {
+  const d = $('settings');
+  d.open = true;
+  d.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+async function cookieRequest(method, body) {
+  const res = await api('/api/cookies', body ? { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { method });
+  setCookieState(await res.json());
+}
+$('cookieForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await cookieRequest('PUT', { sessionid: $('sessionid').value, csrftoken: $('csrftoken').value });
+    $('sessionid').value = ''; $('csrftoken').value = '';
+    toast('로그인 쿠키를 저장했어요. 이제 다시 조회해 보세요.', 'info', 3500);
+  } catch (err) { toast(err.message); }
+});
+$('cookieDel').addEventListener('click', async () => {
+  if (!confirm('저장된 로그인 쿠키를 삭제할까요?')) return;
+  try { await cookieRequest('DELETE'); toast('삭제했어요', 'info', 2000); } catch (err) { toast(err.message); }
+});
+
 /* ---------- 시작 ---------- */
+api('/api/cookies').then((r) => r.json()).then(setCookieState).catch(() => { $('cookieState').textContent = '—'; });
 $('autosave').checked = store.get('autosave') === '1';
 $('autosave').addEventListener('change', (e) => store.set('autosave', e.target.checked ? '1' : '0'));
 if (!clipboardSupported) {

@@ -12,11 +12,13 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 COPY app.py igdl.py ./
 COPY static ./static
 
-RUN useradd --system --uid 10001 app && chown -R app /app
+RUN useradd --system --uid 10001 app && mkdir /data && chown -R app /app /data
 USER app
 
 # 컨테이너는 APP_TOKEN 없이는 시작되지 않습니다(app.py가 확인).
-ENV HOST=0.0.0.0 PORT=5000 PYTHONUNBUFFERED=1 REQUIRE_APP_TOKEN=1
+# /data: 앱 화면에서 등록한 인스타그램 로그인 쿠키가 저장되는 곳(볼륨으로 유지).
+ENV HOST=0.0.0.0 PORT=5000 PYTHONUNBUFFERED=1 REQUIRE_APP_TOKEN=1 IGDL_DATA_DIR=/data
+VOLUME ["/data"]
 EXPOSE 5000
 
 HEALTHCHECK --interval=60s --timeout=5s --retries=3 \

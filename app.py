@@ -12,7 +12,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from flask import Flask, Response, jsonify, redirect, request, send_from_directory
@@ -60,10 +60,19 @@ def _is_https() -> bool:
     return request.is_secure or request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip() == "https"
 
 
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
 @app.before_request
 def require_login():
     token = _token()
-    if not token or request.path in PUBLIC_PATHS or request.path.startswith(PUBLIC_PREFIXES):
+    if not token:
+        # 비밀번호 없이 쓰는 모드(내 기기 안에서만)에서는 localhost 호스트명으로 온 요청만 받습니다.
+        # 악성 웹페이지가 DNS를 조작해 내 기기의 localhost 서버를 건드리는 공격(DNS 리바인딩)을 막습니다.
+        if (urlsplit("//" + request.host).hostname or "") not in LOOPBACK_HOSTS:
+            return "비밀번호(APP_TOKEN) 없이는 localhost로만 접속할 수 있어요.", 403
+        return None
+    if request.path in PUBLIC_PATHS or request.path.startswith(PUBLIC_PREFIXES):
         return None
     if _valid_cookie(token, request.cookies.get(COOKIE_NAME, "")):
         return None
@@ -124,6 +133,24 @@ def service_worker():
     resp = send_from_directory(app.static_folder, "sw.js", mimetype="text/javascript")
     resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+@app.get("/api/cookies")
+def cookies_get():
+    return jsonify(igdl.cookies_status())  # 값은 절대 돌려주지 않습니다
+
+
+@app.put("/api/cookies")
+def cookies_put():
+    body = request.get_json(silent=True) or {}  # force=True를 쓰지 않아 cross-site 폼 전송으로는 못 바꿉니다
+    igdl.save_cookies(str(body.get("sessionid", "")), str(body.get("csrftoken", "")))
+    return jsonify(igdl.cookies_status())
+
+
+@app.delete("/api/cookies")
+def cookies_delete():
+    igdl.clear_cookies()
+    return jsonify(igdl.cookies_status())
 
 
 @app.post("/api/info")

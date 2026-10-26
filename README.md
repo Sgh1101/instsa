@@ -32,18 +32,42 @@ python app.py                                        # http://127.0.0.1:5000
 
 복사 단계 없이 인스타그램의 **공유 → 이 앱**으로 보낼 수 있습니다. 이 앱을 홈 화면에 설치(PWA)하면 공유 대상 목록에 나타납니다.
 
-- **안드로이드 Chrome**: 메뉴 → "홈 화면에 추가/앱 설치". 설치 후 인스타그램 공유 시트에 "인스타 저장"이 뜹니다.
+- **안드로이드 Chrome**: HTTPS 주소(방법 B)에서 "앱 설치"하면 인스타그램 공유 시트에 "인스타 저장"이 뜹니다. `localhost`(Termux)로 설치한 경우에 뜨는지는 확인하지 못했습니다.
 - **iOS**: 공유 대상 등록이 되는지는 확인하지 못했습니다(Chrome 문서가 보장하는 것은 안드로이드 Chrome 76 이상). 기대하지 말고 클립보드/붙여넣기 방식을 기본으로 쓰세요.
 - 설치와 공유 대상 등록은 **HTTPS(또는 localhost)** 에서만 됩니다.
 - 어떤 환경에서든 `https://내주소/?url=인스타링크` 로 열면 자동 조회됩니다.
 
 ## 내 폰에서 나만 쓰기
 
-이 앱은 **설치형 웹 앱(PWA)** 입니다. 홈 화면에 아이콘이 생기고 주소창 없는 앱 화면으로 열리지만, 앱스토어 앱(APK/IPA)은 아닙니다. 서버(이 코드)는 항상 켜져 있는 곳에서 돌고, 폰은 거기에 접속합니다.
+이 앱은 **설치형 웹 앱(PWA)** 입니다. 홈 화면에 아이콘이 생기고 주소창 없는 앱 화면으로 열리지만, 앱스토어 앱(APK)은 아닙니다. 서버(이 코드)가 어딘가에서 돌고, 폰의 Chrome이 거기에 접속하는 구조입니다.
 
-### 권장: 집 컴퓨터 + Docker + Tailscale (안드로이드·아이폰 공통)
+### 방법 A (기본): 폰 하나로 — Termux
 
-[Tailscale](https://tailscale.com/)은 내 기기끼리만 연결되는 사설망(VPN)입니다. 서버를 인터넷에 공개하지 않고 폰에서만 `https://…ts.net` 주소로 접속할 수 있어서, "나만 쓰기"에 가장 알맞습니다. 집/가정용 인터넷 IP는 클라우드 서버 IP보다 인스타그램 제한이 덜한 편으로 알려져 있습니다(일반적으로 알려진 경향이며 직접 비교해 보지는 못했습니다).
+컴퓨터가 필요 없습니다. 폰 안에서 서버를 돌리고(`localhost`, 기기 밖으로는 열리지 않음) Chrome으로 접속합니다. 폰 밖에서 접근할 수 없으니 HTTPS도 비밀번호도 필요 없습니다. 단, Termux가 실행 중이어야 합니다.
+
+1. **Termux 설치**: [F-Droid](https://f-droid.org/packages/com.termux/) 또는 [GitHub 릴리스](https://github.com/termux/termux-app/releases)에서 받으세요. **Play 스토어 버전은 공식 배포가 아니라 구버전**입니다([공식 안내](https://github.com/termux/termux-app/discussions/4000)). 배포처를 섞으면 업데이트가 안 되니 한 곳만 쓰세요.
+2. **Termux에서 설치** (한 번만):
+   ```bash
+   pkg install -y git
+   git clone -b ccr-ee153283-acrbmz https://github.com/Sgh1101/instsa && cd instsa
+   bash termux/setup.sh      # python, ffmpeg, 의존성 설치
+   ```
+   저장소가 비공개라면 GitHub 로그인(토큰)이 필요합니다.
+3. **켜기**: `bash termux/start.sh` — 서버를 켜고 Chrome으로 `http://localhost:5000`을 엽니다. (끄기: `bash termux/stop.sh`)
+4. **앱으로 설치**: Chrome 메뉴(⋮) → **앱 설치 / 홈 화면에 추가**.
+5. **로그인 쿠키 등록**: 화면 맨 아래 **'인스타그램 로그인 설정'** (아래 [쿠키](#인스타그램-로그인-쿠키) 참고). 사실상 필수입니다.
+6. **쓰기**: 인스타그램 → 공유 → **링크 복사** → 앱 열기. 처음 한 번 "클립보드 허용"을 누르면 이후 자동으로 인식합니다.
+
+폰을 재부팅하거나 Termux가 종료되면 3번을 다시 실행하세요. 화면이 꺼져도 멈추지 않게 `start.sh`가 wake-lock을 겁니다. 기기에 따라 설정에서 Termux의 배터리 최적화를 꺼 줘야 할 수 있습니다.
+업데이트: `git pull && .venv/bin/pip install -U yt-dlp` (인스타그램이 바뀌면 yt-dlp 업데이트로 대부분 해결됩니다).
+
+> `PORT`를 바꿀 때는 Chrome이 차단하는 포트(5060, 5061, 6000, 6665~6669 등)를 피하세요. `ERR_UNSAFE_PORT`가 납니다.
+
+**한계**: localhost로 설치한 앱이 인스타그램의 **공유 목록에 나타나는지는 확인하지 못했습니다.** 위 6번(링크 복사 → 앱 열기)을 기본으로 생각하세요.
+
+### 방법 B: 항상 켜 둔 컴퓨터가 있다면 — Docker + Tailscale
+
+폰에서 `https://…ts.net` 주소로 접속하므로 HTTPS 설치와 공유 목록 등록(안드로이드 Chrome)이 확실하게 됩니다. [Tailscale](https://tailscale.com/)은 내 기기끼리만 연결되는 사설망이라 서버가 인터넷에 공개되지 않습니다. 집 인터넷 IP는 클라우드 서버 IP보다 인스타그램 제한이 덜한 편으로 알려져 있습니다(직접 비교하지는 못했습니다).
 
 1. **비밀번호 만들기**: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
 2. **서버 켜기** (상시 켜 둘 컴퓨터에서):
@@ -51,43 +75,24 @@ python app.py                                        # http://127.0.0.1:5000
    APP_TOKEN='위에서 만든 비밀번호' docker compose up -d --build
    ```
    포트는 그 컴퓨터(127.0.0.1)에만 열립니다. `APP_TOKEN`이 없으면 시작되지 않습니다.
-3. **Tailscale 설치**: 그 컴퓨터와 폰 양쪽에 설치하고 같은 계정으로 로그인합니다. 관리 콘솔에서 MagicDNS와 HTTPS 인증서가 켜져 있어야 합니다(공식 문서 기준 새 tailnet은 기본으로 켜져 있고, 처음 쓸 때 안내가 나옵니다).
-4. **HTTPS로 노출**: 그 컴퓨터에서 `tailscale serve --bg 5000` → `tailscale serve status`에 나온 `https://기기이름.tailnet이름.ts.net` 주소가 내 주소입니다. (명령은 Tailscale 1.52에서 바뀌었으니 안 되면 `tailscale serve --help`를 보세요. [공식 문서](https://tailscale.com/docs/reference/tailscale-cli/serve))
-5. **폰에서**: 그 주소를 열고 비밀번호를 입력 → 브라우저 메뉴의 **"홈 화면에 추가 / 앱 설치"**.
-   - 안드로이드 Chrome: 설치하면 인스타그램의 공유 목록에 "인스타 저장"이 나타납니다.
-   - 아이폰 Safari: 공유 → "홈 화면에 추가". 링크를 복사하고 앱을 열면 "붙여넣기 허용" 확인창이 뜹니다.
-6. 로그인은 90일 유지됩니다. 비밀번호(`APP_TOKEN`)를 바꾸면 모든 기기에서 로그아웃됩니다.
+3. **Tailscale 설치**: 그 컴퓨터와 폰 양쪽에 설치하고 같은 계정으로 로그인합니다. MagicDNS와 HTTPS 인증서가 켜져 있어야 합니다(공식 문서 기준 새 tailnet은 기본으로 켜져 있고, 처음 쓸 때 안내가 나옵니다).
+4. **HTTPS로 노출**: 그 컴퓨터에서 `tailscale serve --bg 5000` → `tailscale serve status`에 나온 `https://기기이름.tailnet이름.ts.net` 주소가 내 주소입니다. (Tailscale 1.52에서 명령이 바뀌었으니 안 되면 `tailscale serve --help`. [공식 문서](https://tailscale.com/docs/reference/tailscale-cli/serve))
+5. **폰에서**: 그 주소를 열고 비밀번호 입력 → Chrome **앱 설치**. 설치하면 인스타그램의 공유 목록에 "인스타 저장"이 나타납니다.
+6. 로그인은 90일 유지됩니다. `APP_TOKEN`을 바꾸면 모든 기기에서 로그아웃됩니다.
 
-**yt-dlp 업데이트**: 인스타그램이 바뀌면 다운로드가 깨질 수 있습니다. 이럴 땐 `docker compose build --pull --no-cache && docker compose up -d`.
-
-### 안드로이드만 쓴다면: 폰에서 직접 (Termux)
-
-서버를 따로 두지 않고 폰 안에서 돌리는 방법입니다. 폰의 모바일/가정 IP로 접속하고 `localhost`는 HTTPS 없이도 설치·공유 대상 등록이 됩니다. 단, Termux 앱이 실행 중이어야 합니다.
-
-```bash
-# F-Droid 등에서 설치한 Termux 안에서
-pkg install python ffmpeg git
-git clone <이 저장소> && cd instsa && pip install -r requirements.txt
-python app.py        # Chrome에서 http://localhost:5000 → "앱 설치"
-```
+업데이트: `docker compose build --pull --no-cache && docker compose up -d`. 쿠키는 `igdl-data` 볼륨에 저장되어 유지됩니다.
 
 ### 직접 확인해 본 것 / 못 한 것
 
 | 항목 | 상태 |
 |---|---|
-| 비밀번호 로그인, 로그아웃 상태 차단, 공유 링크로 열었을 때 로그인 후 복귀, 무차별 대입 잠금 | 자동 테스트 + 브라우저로 확인 |
-| 컨테이너와 같은 `gunicorn` 명령으로 다운로드·zip·동시 요청·임시 파일 정리 | 확인 |
-| **Docker 이미지 빌드(`Dockerfile`)** | **못 해 봄** (개발 환경에 Docker 데몬이 없었음) |
-| **Tailscale 연결, 폰에서 설치, 인스타그램 공유 목록 등장** | **못 해 봄** (실제 기기 필요) |
-| Termux 실행 | 못 해 봄 |
-
-## 쿠키가 사실상 필요합니다
-
-인스타그램은 로그인하지 않은(익명) 접근에 횟수 한도를 두고 있어서, 몇 번 쓰면 이런 오류가 납니다.
-
-> You have exceeded the rate-limit for accessing posts anonymously.
-
-그러면 앱은 "로그인이 필요한 게시물이거나 인스타그램이 요청을 제한했습니다"라고 알려 줍니다. 개인용으로 꾸준히 쓰려면 아래 [쿠키 설정](#쿠키-설정-로그인이-필요한-경우)을 하는 것을 권합니다. Docker로 돌릴 때는 `IG_COOKIES_FROM_BROWSER`를 쓸 수 없으므로 `cookies.txt`를 만들어 `docker-compose.yml`의 주석 처리된 부분(`IG_COOKIES_FILE`, `volumes`)을 풀어 주세요.
+| 쿠키 등록·삭제 화면, 값이 응답/화면에 노출되지 않음, 파일 권한 600, 실제 yt-dlp 코드가 "로그인됨"으로 인식 | 자동 테스트 + 브라우저로 확인 |
+| Termux 스크립트의 시작·중복 실행 방지·종료·실패 시 종료 코드·`127.0.0.1`에만 열림 | 일반 리눅스에서 `termux-*` 명령만 빼고 실제로 실행해 확인 |
+| 비밀번호 로그인, 공유 링크 복귀, 무차별 대입 잠금, 컨테이너와 같은 `gunicorn` 명령으로 다운로드·동시 요청·임시 파일 정리 | 확인 |
+| **실제 안드로이드/Termux에서 설치·실행**(`pkg`, `pip` 포함), **Chrome에서 localhost 앱 설치** | **못 해 봄** (실제 기기 필요) |
+| **인스타그램 공유 목록에 앱이 나타나는지** | **못 해 봄** |
+| **Docker 이미지 빌드**, **Tailscale 연결** | **못 해 봄** (개발 환경에 Docker 데몬이 없었음) |
+| **실제 로그인 쿠키로 인스타그램 다운로드** | **못 해 봄** (계정 없음. 쿠키 없이는 익명 한도에 걸림을 확인) |
 
 ## 지원 범위
 
@@ -98,20 +103,35 @@ python app.py        # Chrome에서 http://localhost:5000 → "앱 설치"
 | `/tv/…` IGTV | O |
 | 스토리, 프로필 전체, 하이라이트 | X (주소 단계에서 안내 후 거부) |
 
-## 쿠키 설정 (로그인이 필요한 경우)
+## 인스타그램 로그인 쿠키
 
-공개 게시물도 인스타그램이 요청을 제한하면 `로그인이 필요한 게시물…` 오류가 날 수 있고, 비공개 계정 게시물(내가 팔로우 중인 경우)은 항상 로그인이 필요합니다. 아래 중 하나를 설정하고 서버를 다시 시작하세요.
+인스타그램은 로그인하지 않은(익명) 접근에 횟수 한도를 둡니다. 몇 번 쓰면 이런 오류가 납니다(실제로 확인했습니다).
+
+> You have exceeded the rate-limit for accessing posts anonymously.
+
+그러면 앱이 쿠키 등록을 안내하고 설정 칸을 자동으로 엽니다. 개인용으로 꾸준히 쓰려면 등록하세요. 내가 팔로우 중인 비공개 계정 게시물도 받을 수 있게 됩니다.
+
+### 앱에서 등록 (폰에서 쓸 때 권장)
+
+화면 맨 아래 **'인스타그램 로그인 설정'** 을 펼치세요.
+
+1. PC 브라우저에서 인스타그램에 로그인
+2. **F12 → Application(애플리케이션) → Cookies → instagram.com**
+3. **`sessionid`** 의 값(Value)을 복사 → 앱의 입력칸에 붙여넣고 저장 (폰으로는 메신저 "나에게 보내기"로 전달)
+
+`sessionid` 하나면 됩니다(yt-dlp는 이 쿠키로 로그인 여부를 판단합니다). `csrftoken`은 선택입니다. 값은 서버(폰 안의 Termux, 또는 Docker 볼륨)에 `cookies.txt`로 저장되고(권한 600), **화면이나 API로 다시 돌려주지 않습니다.** 폰만으로 쿠키를 꺼내는 방법은 확인하지 못했습니다.
+
+### PC에서 직접 실행할 때
 
 ```bash
-# 방법 1) 브라우저에 로그인된 쿠키를 직접 사용
-IG_COOKIES_FROM_BROWSER=chrome python app.py        # firefox, edge, safari 등도 가능
-
-# 방법 2) cookies.txt (Netscape 형식, 브라우저 확장 프로그램으로 내보내기)
-IG_COOKIES_FILE=/path/to/cookies.txt python app.py
+IG_COOKIES_FROM_BROWSER=chrome python app.py        # 브라우저에 로그인된 쿠키를 직접 사용 (firefox, edge, safari 등도 가능)
+IG_COOKIES_FILE=/path/to/cookies.txt python app.py  # Netscape 형식 cookies.txt
 ```
 
-- 쿠키는 **계정 로그인 권한과 같습니다.** 저장소에 커밋하지 마세요 (`cookies*.txt`는 `.gitignore`에 포함).
-- 자동화된 접근은 인스타그램이 계정을 일시 제한할 수 있습니다. 가능하면 **본인 부계정**을 쓰고 짧은 시간에 많은 요청을 보내지 마세요.
+### 주의
+
+- 쿠키는 **계정 로그인 권한과 같습니다.** 반드시 **부계정**을 쓰고, 다른 사람에게 보내거나 저장소에 올리지 마세요(`cookies*.txt`는 `.gitignore`에 포함). 의심되면 인스타그램에서 로그아웃하면 그 쿠키는 무효가 됩니다.
+- 자동화된 접근은 인스타그램이 계정을 일시 제한할 수 있습니다. 짧은 시간에 많은 요청을 보내지 마세요.
 
 ## 테스트
 
@@ -125,8 +145,9 @@ python -m pytest
 ## 구조
 
 ```
-app.py           Flask 서버: /api/info, /api/thumb, /api/download
-igdl.py          추출·다운로드 로직 (Flask 무관)
+app.py           Flask 서버: /api/info, /api/thumb, /api/download, /api/cookies
+igdl.py          추출·다운로드·쿠키 저장 로직 (Flask 무관)
+termux/          안드로이드 Termux용 setup/start/stop 스크립트
 static/          index.html(화면·클립보드 인식), manifest.webmanifest(설치/공유 대상), sw.js, 아이콘
 tests/           pytest
 ```
