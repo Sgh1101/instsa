@@ -39,6 +39,8 @@ public class SaveService extends Service {
     }
 
     static volatile Listener listener;
+    /** 인앱 브라우저(BrowseActivity)가 자기가 시작한 저장의 결과를 받는 자리. 메인 화면의 listener와 따로 둡니다. */
+    static volatile Listener browseListener;
     /** 앱이 화면에 보이는 중인가. 보이면 결과를 화면에 알리므로 완료 알림은 생략합니다. */
     static volatile boolean appVisible;
 
@@ -237,6 +239,10 @@ public class SaveService extends Service {
         Listener l = listener;
         if (l != null) {
             l.onBatch(batch, done, b.total, saved, skipped, failed, stopped, finished, message);
+        }
+        Listener bl = browseListener;
+        if (bl != null) {
+            bl.onBatch(batch, done, b.total, saved, skipped, failed, stopped, finished, message);
         }
         if (finished) {
             BATCHES.remove(batch);

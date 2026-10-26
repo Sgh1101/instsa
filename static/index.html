@@ -144,6 +144,30 @@
   .pchip-del { border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: 8px 12px 8px 4px; cursor: pointer; }
   .profiles .note { margin: 8px 4px 0; color: var(--muted); font-size: .78rem; }
 
+  /* 최근 저장 / 프로필 보기 */
+  .recent, .pview { margin-top: 20px; }
+  .recent h2, .pview h2 { font-size: .95rem; margin: 0 0 8px 4px; }
+  .rrow { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: none; scroll-snap-type: x proximity; }
+  .rrow::-webkit-scrollbar { display: none; }
+  .tile { flex: none; width: 104px; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; scroll-snap-align: start; }
+  .tile .th { position: relative; width: 104px; height: 104px; border-radius: 14px; overflow: hidden; background: var(--fill); display: grid; place-items: center;
+              color: var(--muted); font-weight: 800; border: 1px solid var(--line); }
+  .tile .th img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .tile .badge { position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: 999px; font-size: .68rem; font-weight: 700; background: rgba(0,0,0,.6); color: #fff; }
+  .tile b { display: block; margin-top: 6px; font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile small { color: var(--muted); font-size: .72rem; }
+  .pview { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 14px; box-shadow: var(--shadow); }
+  .pview-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .pview-head .ring { width: 48px; height: 48px; }
+  .pview-head .who { font-size: 1.05rem; }
+  .pview-head .back { margin-left: auto; padding: 8px 12px; }
+  .pview .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pview .row .btn { flex: 1 1 140px; }
+  .pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pgrid .tile, .pgrid .tile .th { width: 100%; }
+  .pgrid .tile .th { height: auto; aspect-ratio: 1; border-radius: 10px; }
+  .pview .note { margin: 12px 2px 0; color: var(--muted); font-size: .78rem; }
+
   /* 로그인 설정 */
   .settings { margin-top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
   .settings summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 8px;
@@ -223,10 +247,29 @@
   </article>
   <div id="dock" class="dock" hidden><button id="main" class="btn primary block" type="button"></button></div>
 
+  <section id="recent" class="recent" hidden>
+    <h2>최근 저장</h2>
+    <div id="recentRow" class="rrow"></div>
+  </section>
+
   <section id="profiles" class="profiles" hidden>
-    <h2>저장한 프로필</h2>
+    <h2>최근 저장한 프로필</h2>
     <div id="profileList" class="chips"></div>
-    <p class="note">누르면 인스타그램으로 열려요. 새 글 알림이 필요하면 인스타그램에서 그 계정의 🔔를 켜 두세요. 알림에서 게시물을 열고 <b>공유 → "바로 저장"</b>을 누르면 화면을 벗어나지 않고 저장돼요. ✕는 저장 기록만 지워요(받은 파일은 그대로).</p>
+    <p class="note">프로필을 누르면 그 계정에서 저장한 게시물을 볼 수 있고, 거기서 인스타그램을 열어 더 받을 수 있어요. ✕는 저장 기록만 지워요(받은 파일은 그대로).</p>
+  </section>
+
+  <section id="pview" class="pview" hidden>
+    <div class="pview-head">
+      <div class="ring"><div class="avatar" id="pvAvatar"></div></div>
+      <div><div class="who" id="pvName"></div><div class="meta" id="pvMeta"></div></div>
+      <button id="pvBack" class="btn soft back" type="button">‹ 목록</button>
+    </div>
+    <div class="row">
+      <button id="pvBrowse" class="btn primary" type="button" hidden>앱 안에서 둘러보기</button>
+      <button id="pvOpen" class="btn soft" type="button">인스타그램에서 열기</button>
+    </div>
+    <div id="pvGrid" class="pgrid"></div>
+    <p id="pvNote" class="note"></p>
   </section>
 
   <details id="settings" class="settings">
@@ -459,7 +502,7 @@ async function save(button, index) {
       await browserDownload(current.url, index);
       toast('저장했어요', 'info', 2200);
     }
-    loadProfiles();
+    loadLibrary();
   } catch (e) {
     toast(e.message);
     showError(e.message, e.detail, current && current.url);
@@ -545,7 +588,7 @@ async function webBatch(links) {
   const msg = `${saved}개 저장${failed ? `, ${failed}개 실패` : ''}${stopped ? '. 인스타그램이 요청을 제한해서 멈췄어요. 잠시 뒤 다시 시도해 주세요.' : ''}`;
   updateBatchProgress(links.length, links.length, msg);
   toast(msg, stopped || failed ? 'error' : 'info', 7000);
-  loadProfiles();
+  loadLibrary();
 }
 
 /* ---------- 조회 ---------- */
@@ -695,22 +738,84 @@ $('cookieDel').addEventListener('click', async () => {
   try { await cookieRequest('DELETE'); toast('삭제했어요', 'info', 2000); } catch (err) { toast(err.message); }
 });
 
-/* ---------- 저장한 프로필 ---------- */
+/* ---------- 최근 저장 / 저장한 프로필 ---------- */
 function relativeDay(ts) {
   const days = Math.floor((Date.now() / 1000 - ts) / 86400);
   return days <= 0 ? '오늘' : days === 1 ? '어제' : `${days}일 전`;
 }
+function relativeTime(ts) {
+  const sec = Math.max(0, Date.now() / 1000 - ts);
+  if (sec < 90) return '방금';
+  if (sec < 3600) return `${Math.floor(sec / 60)}분 전`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}시간 전`;
+  return relativeDay(ts);
+}
+
+let viewProfile = null;   // 프로필 보기 화면에 열려 있는 계정
+async function getJson(path) { return (await api(path)).json(); }
+
+// 저장한 게시물 하나(미리보기 + 계정 + 시각). 눌렀을 때 동작은 openSaved가 정합니다.
+function tile(item, withWho) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'tile';
+  const th = document.createElement('div');
+  th.className = 'th';
+  if (item.thumb) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = '/api/thumbs/' + encodeURIComponent(item.code);
+    img.addEventListener('error', () => img.remove());
+    th.append(img);
+  } else {
+    th.textContent = ((item.uploader || '?')[0] || '?').toUpperCase();
+  }
+  const badge = item.count > 1 ? `${item.count}장` : item.kind === 'video' ? '영상' : '';
+  if (badge) {
+    const e = document.createElement('span');
+    e.className = 'badge';
+    e.textContent = badge;
+    th.append(e);
+  }
+  b.append(th);
+  if (withWho) {
+    const who = document.createElement('b');
+    who.textContent = item.uploader ? '@' + item.uploader : item.code;
+    b.append(who);
+  }
+  const when = document.createElement('small');
+  when.textContent = relativeTime(item.t);
+  b.append(when);
+  b.addEventListener('click', () => openSaved(item));
+  return b;
+}
+
+// 앱: 갤러리에 저장된 파일을 엽니다. 갤러리 기록이 없는 예전 항목이나 웹 버전은 게시물을 다시 불러옵니다.
+function openSaved(item) {
+  if (IN_APP && item.uri) { AndroidBridge.openSaved(item.uri, item.mime || ''); return; }
+  $('url').value = item.url;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  lookup(item.url, null);
+}
+
+function renderRecent(items) {
+  const row = $('recentRow');
+  row.replaceChildren(...items.map((i) => tile(i, true)));
+  $('recent').hidden = !items.length || !!viewProfile;
+}
+
 function renderProfiles(list) {
   const box = $('profileList');
   box.replaceChildren();
-  $('profiles').hidden = !list.length;
+  $('profiles').hidden = !list.length || !!viewProfile;
   for (const p of list) {
     const card = document.createElement('div');
     card.className = 'pchip';
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'pchip-open';
-    open.title = '인스타그램에서 열기';
+    open.title = '이 계정에서 저장한 게시물 보기';
     const ring = document.createElement('div'); ring.className = 'ring';
     const av = document.createElement('div'); av.className = 'avatar'; av.textContent = (p.name[0] || '?').toUpperCase();
     ring.append(av);
@@ -719,7 +824,7 @@ function renderProfiles(list) {
     const sub = document.createElement('small'); sub.textContent = ` ${p.count}개 · ${relativeDay(p.last)}`;
     text.append(name, sub);
     open.append(ring, text);
-    open.addEventListener('click', () => openProfile(p.name));
+    open.addEventListener('click', () => showProfile(p.name));
     const del = document.createElement('button');
     del.type = 'button'; del.className = 'pchip-del'; del.textContent = '✕';
     del.setAttribute('aria-label', `@${p.name} 저장 기록 지우기`);
@@ -728,23 +833,68 @@ function renderProfiles(list) {
     box.append(card);
   }
 }
-async function loadProfiles() {
-  try { renderProfiles((await (await api('/api/profiles')).json()).profiles); } catch { /* 목록이 없어도 앱은 동작 */ }
+
+// 프로필 보기: 이 계정에서 저장한 게시물 + 인스타그램을 열어 더 받는 버튼.
+// 계정의 게시물 목록을 앱이 자동으로 불러오지는 않습니다(인스타그램이 계정을 제한할 수 있어서).
+// 목록은 사용자가 '둘러보기'에서 직접 넘겨 보고, 게시물마다 저장 버튼을 누릅니다.
+async function renderProfileView() {
+  if (!viewProfile) return;
+  const name = viewProfile;
+  const items = (await getJson('/api/recent?limit=200&u=' + encodeURIComponent(name))).items;
+  if (viewProfile !== name) return;          // 그 사이 닫혔거나 다른 계정으로 바뀜
+  if (!items.length) return closeProfile();  // 기록을 지워서 비었음
+  $('pvAvatar').textContent = (name[0] || '?').toUpperCase();
+  $('pvName').textContent = '@' + name;
+  $('pvMeta').textContent = `저장한 게시물 ${items.length}개 · 마지막 ${relativeTime(items[0].t)}`;
+  $('pvGrid').replaceChildren(...items.map((i) => tile(i, false)));
+}
+function showProfile(name) {
+  viewProfile = name;
+  $('pvBrowse').hidden = !IN_APP;
+  $('pvNote').textContent = IN_APP
+    ? '"앱 안에서 둘러보기"로 인스타그램을 열고, 받고 싶은 게시물을 열어 "이 게시물 저장"을 누르세요. 한 번에 하나씩 누르는 방식이라 계정에 부담이 없어요.'
+    : '인스타그램에서 게시물을 열어 링크를 복사하면 이 화면에서 바로 받을 수 있어요.';
+  $('recent').hidden = true;
+  $('profiles').hidden = true;
+  $('pview').hidden = false;
+  renderProfileView().then(() => $('pview').scrollIntoView({ behavior: 'smooth', block: 'start' })).catch(() => closeProfile());
+}
+function closeProfile() {
+  viewProfile = null;
+  $('pview').hidden = true;
+  loadLibrary();
+}
+$('pvBack').addEventListener('click', closeProfile);
+$('pvOpen').addEventListener('click', () => viewProfile && openProfile(viewProfile));
+$('pvBrowse').addEventListener('click', () => viewProfile && IN_APP && AndroidBridge.openBrowse(viewProfile));
+
+let libraryTimer;
+function loadLibrary() {
+  // 저장이 연달아 끝나면 여러 번 불리므로 잠깐 모아서 한 번만 다시 그립니다.
+  clearTimeout(libraryTimer);
+  libraryTimer = setTimeout(async () => {
+    try {
+      const [profiles, recent] = await Promise.all([getJson('/api/profiles'), getJson('/api/recent?limit=30')]);
+      renderProfiles(profiles.profiles);
+      renderRecent(recent.items);
+      await renderProfileView();
+    } catch { /* 목록이 없어도 앱은 동작 */ }
+  }, 250);
 }
 function openProfile(name) {
   if (IN_APP) AndroidBridge.openProfile(name);
   else window.open('https://www.instagram.com/' + encodeURIComponent(name) + '/', '_blank', 'noopener');
 }
 async function removeProfile(name) {
-  if (!confirm(`@${name}의 저장 기록을 지울까요?\n받은 파일은 그대로 남고, '이미 저장함' 표시만 사라져요.`)) return;
+  if (!confirm(`@${name}의 저장 기록을 지울까요?\n받은 파일은 그대로 남고, '이미 저장함' 표시와 미리보기만 사라져요.`)) return;
   try {
     if (IN_APP) AndroidBridge.removeProfile(name);
-    else { await api('/api/profiles?name=' + encodeURIComponent(name), { method: 'DELETE' }); loadProfiles(); }
+    else { await api('/api/profiles?name=' + encodeURIComponent(name), { method: 'DELETE' }); loadLibrary(); }
   } catch (err) { toast(err.message); }
 }
 
 /* ---------- 시작 ---------- */
-loadProfiles();
+loadLibrary();
 api('/api/cookies').then((r) => r.json()).then(setCookieState).catch(() => { $('cookieState').textContent = '—'; });
 $('autosave').checked = store.get('autosave') === '1';
 $('autosave').addEventListener('change', (e) => store.set('autosave', e.target.checked ? '1' : '0'));
@@ -755,6 +905,7 @@ if (!clipboardSupported && !IN_APP) {
 if (!handleLaunchParams()) checkClipboard();
 document.addEventListener('visibilitychange', checkClipboard);
 window.addEventListener('focus', checkClipboard);
+window.addEventListener('focus', loadLibrary);
 
 if (!IN_APP && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
@@ -778,9 +929,10 @@ if (IN_APP) {
 
   // 묶음 저장 진행(서비스가 하나 끝낼 때마다 호출). 화면이 꺼져 있던 동안의 결과는 알림으로 갑니다.
   window.__batch = (batch, done, total, saved, skipped, failed, stopped, finished, message) => {
+    loadLibrary();   // 하나 끝날 때마다 '최근 저장'에 반영(짧은 시간에 여러 번 불려도 한 번만 다시 그림)
     if (batch !== activeBatch) {
       // 이 화면이 시작한 묶음이 아님(화면을 다시 열었거나 다른 묶음). 진행 화면은 건드리지 않고 끝났다면 요약만 알립니다.
-      if (finished) { toast(message, stopped || failed ? 'error' : 'info', 7000); loadProfiles(); }
+      if (finished) { toast(message, stopped || failed ? 'error' : 'info', 7000); loadLibrary(); }
       return;
     }
     const detail = `${saved}개 저장${skipped ? `, ${skipped}개는 이미 받아서 건너뜀` : ''}${failed ? `, ${failed}개 실패` : ''}`;
@@ -790,15 +942,16 @@ if (IN_APP) {
       if (mode === 'batch') $('main').disabled = false; // 지금 묶음 화면일 때만(낱개 저장 중인 버튼은 건드리지 않음)
       toast(message, stopped || failed ? 'error' : 'info', 7000);
       if (stopped || failed) showError(message, '', batchLinks[0]); // 원인은 message에 들어 있고, 진단 버튼으로 더 볼 수 있음
-      loadProfiles();
+      loadLibrary();
     }
   };
-  window.__profilesChanged = () => loadProfiles();
+  window.__profilesChanged = () => loadLibrary();
 
   // 저장은 앱이 하고(갤러리), 끝나면 결과를 알려 줍니다.
   const pendingSaves = new Map();
   let saveSeq = 0;
   window.__saved = (id, ok, message, detail) => {
+    loadLibrary();   // 인앱 브라우저처럼 이 화면이 시작하지 않은 저장도 최근 목록에 반영
     const p = pendingSaves.get(id);
     if (!p) return;
     pendingSaves.delete(id);

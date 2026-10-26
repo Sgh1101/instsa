@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -67,6 +68,12 @@ def handle(method, path, query):
             return _json(200, lib.cookies_status())
         if method == "GET" and path == "/api/profiles":
             return _json(200, {"profiles": lib.list_profiles()})
+        if method == "GET" and path == "/api/recent":
+            limit = int(q.get("limit", ["30"])[0] or 30)
+            return _json(200, {"items": lib.recent(limit, q.get("u", [None])[0])})
+        if method == "GET" and path.startswith("/api/thumbs/"):
+            data, ctype = lib.thumb_bytes(path.rsplit("/", 1)[-1])
+            return [200, ctype, data]
         if method == "GET" and path == "/api/diag":
             return _json(200, {"text": diagnose(q.get("url", [""])[0])})
         return _json(404, {"error": "없는 주소예요."})
@@ -107,6 +114,8 @@ def save(url, index, cache_dir, skip_saved=False):
                 "dir": str(dest),
                 "code": code,
                 "uploader": meta.get("uploader") or "",
+                "thumb_url": meta.get("thumb_url") or "",
+                "kind": meta.get("kind") or "",
                 "files": [
                     {
                         "path": str(p),
@@ -200,8 +209,18 @@ def diagnose(url=""):
     return "\n".join(lines)
 
 
-def mark_saved(code, uploader):
-    _igdl().record_saved(code, uploader)
+def mark_saved(code, uploader, thumb_url="", count=0, kind="", uri="", mime=""):
+    _igdl().record_saved(code, uploader, count=count, kind=kind, thumb_url=thumb_url, uri=uri, mime=mime)
+
+
+def is_saved(code):
+    """인앱 브라우저가 '이 게시물 저장'/'다시 저장' 표시를 정할 때 씁니다(인스타그램에 요청하지 않음)."""
+    lib = _igdl()
+    return bool(_valid_code(code) and lib.is_saved(code))
+
+
+def _valid_code(code):
+    return bool(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", code or ""))
 
 
 def remove_profile(name):

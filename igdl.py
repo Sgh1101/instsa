@@ -190,11 +190,86 @@ def _write_library(lib: dict) -> None:
     os.replace(tmp, path)
 
 
-def record_saved(code: str, uploader: str | None) -> None:
+_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_THUMB_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+MAX_THUMBS = 300  # 미리보기 파일은 최근 300개만 보관(오래된 것부터 지움)
+
+
+def _thumbs_dir() -> Path:
+    return data_dir() / "thumbs"
+
+
+def _thumb_file(code: str, ext: str) -> Path | None:
+    # code는 파일 이름이 되므로 형식을 엄격히 확인합니다(경로 조작 방지).
+    if not _CODE_RE.match(code or "") or ext not in _THUMB_EXT.values():
+        return None
+    return _thumbs_dir() / f"{code}.{ext}"
+
+
+def _store_thumb(code: str, thumb_url: str) -> str:
+    """미리보기 이미지를 받아 저장하고 확장자를 돌려줍니다. 실패하면 빈 문자열(미리보기는 부가 기능)."""
+    try:
+        data, ctype = fetch_thumbnail(thumb_url)
+        ext = _THUMB_EXT.get(ctype.split(";")[0].strip(), "")
+        path = _thumb_file(code, ext) if ext else None
+        if not path:
+            return ""
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return ext
+    except Exception:
+        return ""
+
+
+def record_saved(code: str, uploader: str | None, *, count: int = 0, kind: str = "", thumb_url: str = "",
+                 uri: str = "", mime: str = "") -> None:
+    """받은 게시물을 기록합니다. 미리보기(thumb_url)가 있으면 작은 이미지를 받아 둡니다."""
+    ext = _store_thumb(code, thumb_url) if thumb_url else ""
     with _LIBRARY_LOCK:
         lib = _load_library()
-        lib["saved"][code] = {"u": uploader or "", "t": int(time.time())}
+        old = lib["saved"].get(code, {})
+        lib["saved"][code] = {
+            "u": uploader or "", "t": int(time.time()), "n": int(count or 0), "k": kind or "",
+            "th": ext or old.get("th", ""), "uri": uri or "", "mime": mime or "",
+        }
+        _prune_thumbs(lib)
         _write_library(lib)
+
+
+def _prune_thumbs(lib: dict) -> None:
+    """미리보기 파일이 있는 항목이 MAX_THUMBS개를 넘으면 오래된 것부터 파일을 지웁니다(기록은 남김)."""
+    with_thumb = sorted(((v.get("t", 0), c) for c, v in lib["saved"].items() if v.get("th")), reverse=True)
+    for _, code in with_thumb[MAX_THUMBS:]:
+        path = _thumb_file(code, lib["saved"][code]["th"])
+        if path:
+            path.unlink(missing_ok=True)
+        lib["saved"][code]["th"] = ""
+
+
+def recent(limit: int = 30, uploader: str | None = None) -> list[dict]:
+    """최근에 받은 게시물(최신순). uploader를 주면 그 계정의 것만."""
+    items = []
+    for code, v in _load_library()["saved"].items():
+        if uploader is not None and v.get("u") != uploader:
+            continue
+        items.append({
+            "code": code, "uploader": v.get("u", ""), "t": int(v.get("t", 0)), "count": int(v.get("n", 0)),
+            "kind": v.get("k", ""), "thumb": bool(v.get("th")), "uri": v.get("uri", ""), "mime": v.get("mime", ""),
+            "url": f"https://www.instagram.com/p/{code}/",
+        })
+    items.sort(key=lambda i: i["t"], reverse=True)
+    return items[: max(1, min(int(limit), 200))]
+
+
+def thumb_bytes(code: str) -> tuple[bytes, str]:
+    ext = _load_library()["saved"].get(code, {}).get("th", "")
+    path = _thumb_file(code, ext) if ext else None
+    if not path or not path.is_file():
+        raise IgError("미리보기가 없어요.", 404)
+    ctype = {v: k for k, v in _THUMB_EXT.items()}[ext]
+    return path.read_bytes(), ctype
 
 
 def is_saved(code: str) -> bool:
@@ -218,6 +293,11 @@ def remove_profile(name: str) -> None:
     """이 계정의 저장 기록을 지웁니다(목록에서 사라지고, '이미 저장함' 표시도 사라짐). 갤러리의 파일은 그대로입니다."""
     with _LIBRARY_LOCK:
         lib = _load_library()
+        for code, v in lib["saved"].items():
+            if v.get("u") == name and v.get("th"):
+                path = _thumb_file(code, v["th"])
+                if path:
+                    path.unlink(missing_ok=True)
         lib["saved"] = {c: v for c, v in lib["saved"].items() if v.get("u") != name}
         _write_library(lib)
 
@@ -284,6 +364,15 @@ def _best_thumbnail(entry: dict) -> dict | None:
         if best is None or (t.get("width") or 0) * (t.get("height") or 0) >= (best.get("width") or 0) * (best.get("height") or 0):
             best = t
     return best
+
+
+def _small_thumbnail(entry: dict, want: int = 320) -> dict | None:
+    """목록용 작은 미리보기: 너비 want 이상 중 가장 작은 것(없으면 가장 큰 것)."""
+    thumbs = [t for t in entry.get("thumbnails") or [] if t.get("url")]
+    big_enough = [t for t in thumbs if (t.get("width") or 0) >= want]
+    if big_enough:
+        return min(big_enough, key=lambda t: t.get("width") or 0)
+    return _best_thumbnail(entry)
 
 
 def _is_video(entry: dict) -> bool:
@@ -402,6 +491,9 @@ def fetch_post(raw_url: str, dest: Path, only: int | None = None, meta: dict | N
             if meta is not None:
                 meta["code"] = shortcode(url)
                 meta["uploader"] = info.get("channel") or info.get("uploader")
+                meta["kind"] = "video" if any(_is_video(e) for e in _entries(info)) else "image"
+                first = _entries(info)[0] if _entries(info) else {}
+                meta["thumb_url"] = (_small_thumbnail(first) or {}).get("url", "")
             entries = _entries(info)
             is_playlist = info.get("_type") == "playlist"
             if not entries or (only and not is_playlist and only != 1):

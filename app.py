@@ -135,6 +135,17 @@ def service_worker():
     return resp
 
 
+@app.get("/api/recent")
+def recent_get():
+    return jsonify(items=igdl.recent(request.args.get("limit", 30, type=int), request.args.get("u")))
+
+
+@app.get("/api/thumbs/<code>")
+def thumb_get(code):
+    data, ctype = igdl.thumb_bytes(code)
+    return Response(data, content_type=ctype, headers={"Cache-Control": "private, max-age=3600"})
+
+
 @app.get("/api/profiles")
 def profiles_get():
     return jsonify(profiles=igdl.list_profiles())
@@ -192,7 +203,8 @@ def download():
         meta = {}
         files = igdl.fetch_post(url, tmp / "raw", only=index, meta=meta)
         if not index:  # 게시물 전체를 받았을 때만 '저장한 게시물'로 기록(일부 항목만 받은 경우는 제외)
-            igdl.record_saved(meta.get("code") or code, meta.get("uploader"))
+            igdl.record_saved(meta.get("code") or code, meta.get("uploader"), count=len(files), kind=meta.get("kind", ""),
+                              thumb_url=meta.get("thumb_url", ""))
         if len(files) == 1:
             n, path = files[0]
             send_path, name = path, f"{code}_{n:02d}{path.suffix}"

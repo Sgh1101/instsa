@@ -80,8 +80,8 @@ public class LoginActivity extends Activity {
             runOnUiThread(() -> {
                 Toast.makeText(this, finalMessage, Toast.LENGTH_LONG).show();
                 if (finalOk) {
-                    // 이 앱에 저장했으니 WebView에 남은 복사본은 지웁니다.
-                    CookieManager.getInstance().removeAllCookies(null);
+                    // WebView의 로그인 상태는 남겨 둡니다: '앱 안에서 둘러보기'(BrowseActivity)가 같은 로그인을 씁니다.
+                    // 로그인 해제를 누르면 MainActivity가 이 쿠키도 함께 지웁니다.
                     CookieManager.getInstance().flush();
                     setResult(RESULT_OK);
                 }
@@ -90,7 +90,7 @@ public class LoginActivity extends Activity {
         }).start();
     }
 
-    private static String cookieValue(String cookieHeader, String name) {
+    static String cookieValue(String cookieHeader, String name) {
         for (String part : cookieHeader.split(";")) {
             String p = part.trim();
             if (p.startsWith(name + "=")) {

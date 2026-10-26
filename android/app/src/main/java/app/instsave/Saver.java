@@ -88,15 +88,24 @@ final class Saver {
             JSONArray files = o.getJSONArray("files");
             Uri last = null;
             String lastMime = null;
+            Uri first = null;
+            String firstMime = null;
             for (int i = 0; i < files.length(); i++) {
                 JSONObject f = files.getJSONObject(i);
                 String mime = f.getString("mime");
                 last = saveToGallery(context, new File(f.getString("path")), f.getString("name"), mime);
                 lastMime = mime;
+                if (first == null) {
+                    first = last;
+                    firstMime = mime;
+                }
             }
             if (index == 0) {
                 // 갤러리 저장까지 끝난 게시물만 '저장한 게시물'로 기록합니다(다음 묶음 저장에서 건너뛰고, 프로필 목록에 올라감).
-                api.callAttr("mark_saved", o.optString("code"), o.optString("uploader"));
+                // 미리보기 주소·개수·종류·첫 파일 위치도 함께 남겨 '최근 저장' 목록에서 쓰입니다.
+                api.callAttr("mark_saved", o.optString("code"), o.optString("uploader"), o.optString("thumb_url"),
+                        files.length(), o.optString("kind"), first == null ? "" : first.toString(),
+                        firstMime == null ? "" : firstMime);
             }
             return Result.ok(files.length() + "개를 갤러리에 저장했어요", last, lastMime);
         } catch (Exception e) {

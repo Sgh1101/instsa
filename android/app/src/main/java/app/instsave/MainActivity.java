@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.WebChromeClient;
@@ -43,6 +44,7 @@ public class MainActivity extends Activity {
     /** 가상의 주소입니다. 네트워크로 나가지 않고 전부 이 앱이 응답합니다. */
     static final String HOST = "app.local";
     private static final int REQ_LOGIN = 1;
+    private static final int REQ_BROWSE = 2;
     /** 한 번에 쌓을 수 있는 링크 수. 너무 많이 한꺼번에 요청하면 인스타그램이 계정을 제한할 수 있습니다. */
     static final int MAX_BATCH = 30;
 
@@ -281,6 +283,25 @@ public class MainActivity extends Activity {
             });
         }
 
+        /**
+         * 앱 안에서 인스타그램 프로필을 열어 직접 넘겨 보며 게시물마다 저장합니다.
+         * 앱이 게시물 목록을 대신 불러오지 않습니다(자동 조회 없음) — 사람이 보는 화면에서 사람이 누릅니다.
+         */
+        @JavascriptInterface
+        public void openBrowse(String name) {
+            if (name != null && !name.isEmpty() && !name.matches("[A-Za-z0-9_.]{1,30}")) {
+                return;
+            }
+            runOnUiThread(() -> startActivityForResult(
+                    new Intent(MainActivity.this, BrowseActivity.class).putExtra("name", name == null ? "" : name), REQ_BROWSE));
+        }
+
+        /** 갤러리에 저장된 파일을 갤러리/사진 앱으로 엽니다. 이 앱이 만든 MediaStore 항목만 열 수 있습니다. */
+        @JavascriptInterface
+        public void openSaved(String uri, String mime) {
+            runOnUiThread(() -> openSavedFile(uri, mime));
+        }
+
         @JavascriptInterface
         public void login() {
             runOnUiThread(() -> startActivityForResult(new Intent(MainActivity.this, LoginActivity.class), REQ_LOGIN));
@@ -290,6 +311,11 @@ public class MainActivity extends Activity {
         public void logout() {
             pool.submit(() -> {
                 api.callAttr("clear_cookies");
+                // 인앱 브라우저의 로그인도 함께 지웁니다(앱에는 로그인 해제인데 브라우저는 로그인된 채로 남지 않게).
+                runOnUiThread(() -> {
+                    CookieManager.getInstance().removeAllCookies(null);
+                    CookieManager.getInstance().flush();
+                });
                 js("window.__cookieChanged && window.__cookieChanged()");
             });
         }
@@ -309,6 +335,29 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String clipboardText() {
             return clipboardString();
+        }
+    }
+
+    private void openSavedFile(String uriText, String mime) {
+        Uri uri = uriText == null ? null : Uri.parse(uriText);
+        // 앱이 기록한 MediaStore 주소만 엽니다(화면이 임의의 주소를 열게 하지 않음).
+        if (uri == null || !"content".equals(uri.getScheme()) || !"media".equals(uri.getAuthority())) {
+            Toast.makeText(this, "열 수 있는 파일 정보가 없어요", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try (android.os.ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(uri, "r")) {
+            if (fd == null) throw new FileNotFoundException();
+        } catch (Exception e) {
+            Toast.makeText(this, "갤러리에서 지워진 파일이에요", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, mime == null || mime.isEmpty() ? "image/*" : mime);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(view);
+        } catch (Exception e) {
+            Toast.makeText(this, "파일을 열 수 있는 앱이 없어요", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -389,8 +438,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_LOGIN) {
+        if (requestCode == REQ_LOGIN || requestCode == REQ_BROWSE) {
+            // 로그인 상태가 바뀌었을 수 있고(둘러보기 중 로그인), 둘러보며 저장한 게시물이 생겼을 수 있습니다.
             js("window.__cookieChanged && window.__cookieChanged()");
+            js("window.__profilesChanged && window.__profilesChanged()");
         }
     }
 

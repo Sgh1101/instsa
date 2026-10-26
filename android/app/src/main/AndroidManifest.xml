@@ -55,6 +55,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- 인스타그램 프로필/게시물을 직접 넘겨 보면서 게시물마다 저장 버튼을 누르는 화면 -->
+        <activity
+            android:name=".BrowseActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:exported="false" />
+
         <activity
             android:name=".LoginActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
