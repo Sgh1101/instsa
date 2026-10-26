@@ -68,6 +68,15 @@ def test_translate_login_required():
     assert err.status == 401 and "쿠키" in err.message
 
 
+def test_translate_rate_limited():
+    # 실제 서버 로그에서 확인된 메시지입니다.
+    err = igdl._translate(
+        "ERROR: [Instagram] CuE2WNQs6vH: Unable to download webpage: HTTP Error 429: Too Many Requests "
+        "(caused by <HTTPError 429: Too Many Requests>)"
+    )
+    assert err.status == 429 and "일시적으로 제한" in err.message and "HTTP" not in err.message
+
+
 def test_translate_not_found():
     assert igdl._translate("ERROR: [Instagram] AbC: HTTP Error 404: Not Found").status == 404
 

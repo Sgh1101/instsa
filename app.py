@@ -30,6 +30,19 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+@app.get("/manifest.webmanifest")
+def manifest():
+    return send_from_directory(app.static_folder, "manifest.webmanifest", mimetype="application/manifest+json")
+
+
+@app.get("/sw.js")
+def service_worker():
+    # 서비스 워커는 루트 경로에서 제공돼야 전체 범위(scope "/")를 가질 수 있습니다.
+    resp = send_from_directory(app.static_folder, "sw.js", mimetype="text/javascript")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 @app.post("/api/info")
 def info():
     body = request.get_json(silent=True) or {}

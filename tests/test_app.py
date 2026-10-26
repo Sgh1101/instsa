@@ -24,6 +24,24 @@ def test_index_served(client):
     assert r.status_code == 200 and "인스타 다운로더" in r.get_data(as_text=True)
 
 
+def test_pwa_manifest_and_icons(client):
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200 and r.mimetype == "application/manifest+json"
+    data = r.get_json(force=True)
+    # 인스타그램 앱의 공유 시트에서 바로 받을 수 있게 하는 공유 대상 등록
+    assert data["share_target"]["method"] == "GET"
+    assert data["share_target"]["params"]["url"] == "url"
+    assert {i["sizes"] for i in data["icons"]} >= {"192x192", "512x512"}
+    for icon in data["icons"]:
+        assert client.get(icon["src"]).status_code == 200, icon["src"]
+
+
+def test_service_worker_served_from_root(client):
+    r = client.get("/sw.js")
+    assert r.status_code == 200 and "javascript" in r.mimetype
+    assert r.headers["Cache-Control"] == "no-cache"
+
+
 def test_info_proxies_thumbnails(client, fake_instagram):
     r = client.post("/api/info", json={"url": "https://www.instagram.com/p/CAR1/"})
     assert r.status_code == 200

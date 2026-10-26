@@ -2,142 +2,268 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>인스타 다운로더</title>
+<meta name="description" content="인스타그램 링크를 복사하면 사진과 영상을 바로 저장해요.">
+<meta name="theme-color" content="#dd2a7b">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
 <style>
   :root {
-    --bg: #fafafa; --card: #fff; --text: #1a1a1a; --muted: #6b7280; --line: #e5e7eb;
-    --accent: #c13584; --accent-text: #fff; --error: #b91c1c; --error-bg: #fef2f2;
+    --ig: linear-gradient(45deg, #feda75 0%, #fa7e1e 25%, #d62976 55%, #962fbf 78%, #4f5bd5 100%);
+    /* 흰 글자가 올라가는 버튼은 전 구간 대비 4.5:1 이상(AA)이 되도록 주황·노랑을 뺀 그라데이션을 씁니다. */
+    --btn: linear-gradient(90deg, #d62976 0%, #a02ab5 55%, #5b51d8 100%);
+    --bg: #fafafa; --card: #fff; --text: #262626; --muted: #737373; --line: #dbdbdb; --fill: #efefef;
+    --accent: #d62976; --error-bg: #fff0f1; --error: #c1121f; --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #111; --card: #1c1c1e; --text: #f3f4f6; --muted: #9ca3af; --line: #2f2f33;
-            --accent: #e1558f; --error: #fca5a5; --error-bg: #3b1515; }
+    :root { --bg: #000; --card: #121212; --text: #f5f5f5; --muted: #a8a8a8; --line: #262626; --fill: #1e1e1e;
+            --accent: #ff5a9d; --error-bg: #2a1013; --error: #ff8a93; --shadow: none; }
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 16px/1.5 -apple-system, "Pretendard", "Noto Sans KR", system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 1.5rem; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; font-size: .9rem; }
-  form { display: flex; gap: 8px; flex-wrap: wrap; }
-  input[type=url], input[type=text] { flex: 1 1 260px; min-width: 0; padding: 12px 14px; font-size: 1rem;
-         border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
-  button { padding: 12px 18px; font-size: 1rem; border: 0; border-radius: 10px; cursor: pointer;
-           background: var(--accent); color: var(--accent-text); font-weight: 600; }
-  button:disabled { opacity: .55; cursor: progress; }
-  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 8px 12px; font-size: .9rem;
-                 flex-shrink: 0; white-space: nowrap; }
-  #status { margin-top: 16px; padding: 12px 14px; border-radius: 10px; display: none; }
-  #status.error { display: block; background: var(--error-bg); color: var(--error); }
-  #status.info { display: block; color: var(--muted); }
-  #result { margin-top: 24px; display: none; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-  .meta b { display: block; }
-  .caption { color: var(--muted); font-size: .9rem; white-space: pre-wrap; max-height: 4.5em; overflow: hidden; margin-top: 4px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-  .thumb { position: relative; aspect-ratio: 1; background: var(--line); }
-  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .badge { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.65); color: #fff; font-size: .75rem;
-           padding: 2px 8px; border-radius: 999px; }
-  .card .row { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-  .card small { color: var(--muted); }
-  footer { margin-top: 40px; color: var(--muted); font-size: .8rem; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { color-scheme: light dark; }
+  body { margin: 0; background: var(--bg); color: var(--text); min-height: 100dvh;
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif; }
+  main { max-width: 480px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px max(48px, env(safe-area-inset-bottom)); }
+
+  /* 헤더 */
+  .top { display: flex; align-items: center; gap: 12px; margin: 4px 0 20px; }
+  .logo { width: 44px; height: 44px; border-radius: 13px; background: var(--ig); display: grid; place-items: center; flex: none;
+          box-shadow: 0 6px 16px rgba(214,41,118,.28); }
+  .logo svg { width: 24px; height: 24px; }
+  h1 { font-size: 1.25rem; line-height: 1.2; margin: 0; letter-spacing: -.02em; font-weight: 800; }
+  .tag { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
+
+  /* 자동 인식 배너 */
+  .detect { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 12px; border-radius: 14px;
+            background: var(--card); border: 1px solid transparent;
+            background-image: linear-gradient(var(--card), var(--card)), var(--ig);
+            background-origin: border-box; background-clip: padding-box, border-box; font-size: .88rem; }
+  .detect .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ig); flex: none; animation: pulse 1.2s ease-in-out infinite; }
+  .detect.done .dot { animation: none; }
+  @keyframes pulse { 50% { transform: scale(1.6); opacity: .5; } }
+
+  /* 입력 */
+  .search { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line);
+            border-radius: 16px; padding: 6px 6px 6px 14px; box-shadow: var(--shadow); }
+  .search:focus-within { border-color: var(--accent); }
+  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; padding: 8px 0; }
+  .search input::placeholder { color: var(--muted); }
+  .btn { border: 0; cursor: pointer; font: inherit; font-weight: 700; border-radius: 12px; padding: 10px 14px; white-space: nowrap; flex: none;
+         transition: transform .12s, opacity .12s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .6; cursor: progress; }
+  .btn.soft { background: var(--fill); color: var(--text); }
+  .btn.primary { background: var(--btn); color: #fff; box-shadow: 0 6px 16px rgba(214,41,118,.3); }
+  .btn.block { width: 100%; padding: 15px; font-size: 1.05rem; border-radius: 16px; }
+  .btn svg { width: 18px; height: 18px; }
+  .auto { display: flex; align-items: center; gap: 8px; margin: 12px 4px 0; color: var(--muted); font-size: .84rem; cursor: pointer; user-select: none; }
+  .auto input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+  .hint { margin: 8px 4px 0; color: var(--muted); font-size: .82rem; }
+
+  /* 포스트 카드 */
+  .post { margin-top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; box-shadow: var(--shadow); }
+  .post-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+  .ring { width: 40px; height: 40px; border-radius: 50%; padding: 2px; background: var(--ig); flex: none; }
+  .avatar { width: 100%; height: 100%; border-radius: 50%; background: var(--card); border: 2px solid var(--card);
+            display: grid; place-items: center; font-weight: 800; color: var(--accent); }
+  .who { font-weight: 700; line-height: 1.2; }
+  .meta { color: var(--muted); font-size: .8rem; }
+  .media { position: relative; background: var(--fill); }
+  .rail { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .rail::-webkit-scrollbar { display: none; }
+  .slide { position: relative; flex: 0 0 100%; scroll-snap-align: center; aspect-ratio: 4 / 5; max-height: 60dvh; background: var(--fill); }
+  .slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .chip { position: absolute; top: 12px; padding: 4px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700;
+          background: rgba(0,0,0,.6); color: #fff; backdrop-filter: blur(6px); }
+  .chip.kind { left: 12px; } .chip.count { right: 12px; }
+  .round { position: absolute; right: 12px; bottom: 12px; width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
+           background: rgba(255,255,255,.92); color: #262626; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+  .round svg { width: 20px; height: 20px; }
+  .round:disabled { opacity: .7; cursor: progress; }
+  .dots { display: flex; justify-content: center; gap: 5px; padding: 10px 0 2px; }
+  .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line); transition: background .2s, transform .2s; }
+  .dots i.on { background: var(--accent); transform: scale(1.25); }
+  /* 저장 버튼은 화면 아래에 고정해 스크롤 없이 항상 보이게 합니다. */
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; pointer-events: none;
+          padding: 28px 16px max(14px, env(safe-area-inset-bottom));
+          background: linear-gradient(to top, var(--bg) 58%, transparent); }
+  .dock .btn { pointer-events: auto; display: flex; max-width: 448px; margin: 0 auto; }
+  body.has-dock main { padding-bottom: 128px; }
+  body.has-dock #toast { bottom: 96px; }
+  .caption { margin: 0; padding: 12px 14px 16px; color: var(--text); font-size: .9rem; white-space: pre-wrap; word-break: break-word;
+             display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .caption.open { display: block; }
+  .caption:empty { display: none; }
+
+  /* 스켈레톤 */
+  .skel .slide, .skel .ring, .skel .line { background: linear-gradient(90deg, var(--fill) 25%, var(--line) 50%, var(--fill) 75%); background-size: 200% 100%; animation: sh 1.2s linear infinite; }
+  .skel .line { height: 12px; border-radius: 6px; width: 120px; }
+  @keyframes sh { to { background-position: -200% 0; } }
+
+  /* 토스트 */
+  #toast { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translate(-50%, 24px); opacity: 0; pointer-events: none;
+           width: min(448px, calc(100% - 32px)); padding: 14px 16px; border-radius: 14px; background: var(--error-bg); color: var(--error);
+           border: 1px solid var(--error); font-size: .9rem; transition: .25s; z-index: 10; }
+  #toast.show { transform: translate(-50%, 0); opacity: 1; }
+  #toast.info { background: var(--card); color: var(--text); border-color: var(--line); box-shadow: var(--shadow); }
+  footer { margin: 28px 4px 0; color: var(--muted); font-size: .76rem; line-height: 1.5; text-align: center; }
+  [hidden] { display: none !important; }
+  .spin { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>인스타 다운로더</h1>
-  <p class="sub">게시물·릴스 주소를 붙여 넣으면 사진과 영상을 내려받을 수 있어요.</p>
-
-  <form id="form">
-    <input id="url" type="url" required placeholder="https://www.instagram.com/p/…  또는  /reel/…" autocomplete="off" autofocus>
-    <button id="fetch" type="submit">조회</button>
-  </form>
-
-  <div id="status" role="status"></div>
-
-  <section id="result">
-    <div class="head">
-      <div class="meta"><b id="who"></b><div id="caption" class="caption"></div></div>
-      <button id="all" class="ghost" type="button">전체 받기</button>
+  <header class="top">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
     </div>
-    <div id="grid" class="grid"></div>
-  </section>
+    <div>
+      <h1>인스타 다운로더</h1>
+      <p class="tag">링크만 복사하면 바로 저장돼요</p>
+    </div>
+  </header>
 
-  <footer>본인이 올렸거나 저작권자의 허락을 받은 콘텐츠만 내려받으세요. 인스타그램 이용약관과 저작권은 사용자 책임입니다.</footer>
+  <div id="detect" class="detect" hidden><span class="dot"></span><span id="detectText"></span></div>
+
+  <form id="form" class="search" autocomplete="off">
+    <input id="url" type="text" inputmode="url" enterkeyhint="go" placeholder="인스타그램 링크 붙여넣기" aria-label="인스타그램 링크">
+    <button id="paste" class="btn soft" type="button">붙여넣기</button>
+    <button id="go" class="btn primary" type="submit">조회</button>
+  </form>
+  <label class="auto"><input id="autosave" type="checkbox"> 링크를 인식하면 바로 저장</label>
+  <p id="hint" class="hint" hidden></p>
+
+  <article id="skeleton" class="post skel" hidden aria-hidden="true">
+    <div class="post-head"><div class="ring"></div><div class="line"></div></div>
+    <div class="slide" style="flex:none;aspect-ratio:4/5"></div>
+    <div style="height:84px"></div>
+  </article>
+
+  <article id="post" class="post" hidden>
+    <div class="post-head">
+      <div class="ring"><div class="avatar" id="avatar"></div></div>
+      <div><div class="who" id="who"></div><div class="meta" id="meta"></div></div>
+    </div>
+    <div class="media"><div class="rail" id="rail"></div></div>
+    <div class="dots" id="dots"></div>
+    <p id="caption" class="caption" title="눌러서 펼치기"></p>
+  </article>
+  <div id="dock" class="dock" hidden><button id="main" class="btn primary block" type="button"></button></div>
+
+  <footer>본인이 올렸거나 저작권자의 허락을 받은 콘텐츠만 저장하세요.<br>이용약관·저작권에 대한 책임은 사용자에게 있습니다.</footer>
 </main>
+<div id="toast" role="alert"></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let current = null; // 마지막으로 조회한 게시물
+// 정적 문자열만 innerHTML로 넣습니다(사용자 데이터는 항상 textContent).
+const ICON_DL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>';
+const ICON_SPIN = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.55"/></svg>';
+const IG_RE = /https?:\/\/(?:www\.|m\.)?instagram\.com\/(?:[A-Za-z0-9_.]+\/)?(?:p|reels?|tv)\/[A-Za-z0-9_-]+\/?(?:\?[^\s]*)?/i;
 
-function setStatus(kind, text) {
-  const el = $('status');
-  el.className = kind || '';
-  el.textContent = text || '';
+let current = null;
+let busy = false;
+let toastTimer;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+function toast(text, kind = 'error', ms = 5000) {
+  const el = $('toast');
+  el.textContent = text;
+  el.className = 'show ' + (kind === 'info' ? 'info' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
+
+function findLink(text) { const m = IG_RE.exec(text || ''); return m ? m[0] : null; }
 
 async function api(path, options) {
   const res = await fetch(path, options);
   if (!res.ok) {
     let msg = `요청에 실패했습니다 (${res.status})`;
-    try { msg = (await res.json()).error || msg; } catch (_) {}
+    try { msg = (await res.json()).error || msg; } catch {}
     throw new Error(msg);
   }
   return res;
 }
 
+/* ---------- 렌더링 ---------- */
 function render(post) {
   current = post;
-  $('who').textContent = post.uploader ? `@${post.uploader}` : (post.title || '');
-  $('caption').textContent = post.caption || '';
-  const grid = $('grid');
-  grid.replaceChildren();
-  for (const item of post.items) {
-    const card = document.createElement('div');
-    card.className = 'card';
+  const name = post.uploader || post.title || '';
+  $('who').textContent = name ? '@' + name : '인스타그램';
+  $('avatar').textContent = (name[0] || 'I').toUpperCase();
+  const v = post.items.filter((i) => i.kind === 'video').length, p = post.items.length - v;
+  $('meta').textContent = [v && `영상 ${v}`, p && `사진 ${p}`].filter(Boolean).join(' · ');
+  const cap = $('caption');
+  cap.textContent = post.caption || '';
+  cap.classList.remove('open');
 
-    const thumb = document.createElement('div');
-    thumb.className = 'thumb';
+  const rail = $('rail'), dots = $('dots');
+  rail.replaceChildren(); dots.replaceChildren();
+  rail.scrollLeft = 0;
+  const many = post.items.length > 1;
+  for (const item of post.items) {
+    const slide = document.createElement('div');
+    slide.className = 'slide';
     if (item.thumbnail) {
       const img = document.createElement('img');
-      img.src = item.thumbnail;
-      img.alt = `${item.index}번 미리보기`;
-      img.loading = 'lazy';
-      thumb.append(img);
+      img.src = item.thumbnail; img.alt = `${item.index}번 미리보기`; img.decoding = 'async';
+      slide.append(img);
     }
-    const badge = document.createElement('span');
-    badge.className = 'badge';
-    badge.textContent = item.kind === 'video'
-      ? `영상${item.duration ? ' ' + Math.round(item.duration) + '초' : ''}` : '사진';
-    thumb.append(badge);
-
-    const row = document.createElement('div');
-    row.className = 'row';
-    const label = document.createElement('small');
-    label.textContent = `${item.index}번` + (item.width ? ` · ${item.width}×${item.height}` : '');
+    const kind = document.createElement('span');
+    kind.className = 'chip kind';
+    kind.textContent = item.kind === 'video' ? `영상${item.duration ? ' · ' + Math.round(item.duration) + '초' : ''}` : '사진';
+    slide.append(kind);
+    if (many) {
+      const count = document.createElement('span');
+      count.className = 'chip count';
+      count.textContent = `${item.index}/${post.items.length}`;
+      slide.append(count);
+    }
     const btn = document.createElement('button');
-    btn.className = 'ghost';
-    btn.textContent = '다운로드';
-    btn.addEventListener('click', () => download(btn, item.index));
-    row.append(label, btn);
-
-    card.append(thumb, row);
-    grid.append(card);
+    btn.className = 'round'; btn.type = 'button'; btn.innerHTML = ICON_DL;
+    btn.setAttribute('aria-label', `${item.index}번 저장`);
+    btn.addEventListener('click', () => save(btn, item.index));
+    slide.append(btn);
+    rail.append(slide);
+    if (many) dots.append(document.createElement('i'));
   }
-  // 항목이 하나뿐이면 카드의 다운로드 버튼과 중복되므로 전체 받기는 숨깁니다.
-  $('all').style.display = post.items.length > 1 ? '' : 'none';
-  $('all').textContent = `전체 받기 (zip, ${post.items.length}개)`;
-  $('result').style.display = 'block';
+  dots.hidden = !many;
+  syncDots();
+
+  const main = $('main');
+  main.innerHTML = ICON_DL + '<span></span>';
+  main.lastChild.textContent = many ? `전체 저장 (zip · ${post.items.length}개)` : (post.items[0].kind === 'video' ? '영상 저장' : '사진 저장');
+  $('post').hidden = false;
+  showDock(true);
 }
 
-async function download(button, index) {
+function showDock(on) {
+  $('dock').hidden = !on;
+  document.body.classList.toggle('has-dock', on);
+}
+
+function syncDots() {
+  const rail = $('rail');
+  const i = Math.round(rail.scrollLeft / Math.max(rail.clientWidth, 1));
+  [...$('dots').children].forEach((d, n) => d.classList.toggle('on', n === i));
+}
+$('rail').addEventListener('scroll', () => requestAnimationFrame(syncDots), { passive: true });
+$('caption').addEventListener('click', (e) => e.currentTarget.classList.toggle('open'));
+
+/* ---------- 저장 ---------- */
+async function save(button, index) {
   if (!current) return;
-  const original = button.textContent;
+  const html = button.innerHTML;
   button.disabled = true;
-  button.textContent = '받는 중…';
-  setStatus('info', '인스타그램에서 내려받는 중입니다. 영상은 조금 걸릴 수 있어요.');
+  button.innerHTML = button.classList.contains('round') ? ICON_SPIN : ICON_SPIN + '<span>받는 중…</span>';
   try {
     const qs = new URLSearchParams({ url: current.url });
     if (index) qs.set('index', index);
@@ -147,41 +273,127 @@ async function download(button, index) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = m ? decodeURIComponent(m[1]) : 'instagram';
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    setStatus('', '');
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast('저장했어요', 'info', 2200);
   } catch (e) {
-    setStatus('error', e.message);
+    toast(e.message);
   } finally {
     button.disabled = false;
-    button.textContent = original;
+    button.innerHTML = html;
+  }
+}
+$('main').addEventListener('click', (e) => save(e.currentTarget, null));
+
+/* ---------- 조회 ---------- */
+async function lookup(raw, source) {
+  if (busy) return;
+  busy = true;
+  $('go').disabled = true;
+  $('post').hidden = true;
+  showDock(false);
+  $('skeleton').hidden = false;
+  setDetect(source, false);
+  try {
+    const res = await api('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: raw }) });
+    render(await res.json());
+    setDetect(source, true);
+    if (source && $('autosave').checked) await save($('main'), null);
+  } catch (e) {
+    setDetect(null);
+    toast(e.message);
+  } finally {
+    busy = false;
+    $('go').disabled = false;
+    $('skeleton').hidden = true;
   }
 }
 
-$('form').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const btn = $('fetch');
-  btn.disabled = true;
-  $('result').style.display = 'none';
-  setStatus('info', '게시물을 조회하는 중…');
+function setDetect(source, done) {
+  const el = $('detect');
+  if (!source) { el.hidden = true; return; }
+  const label = { clipboard: '클립보드', share: '공유' }[source];
+  $('detectText').textContent = done ? `${label}에서 링크를 찾아 불러왔어요` : `${label}에서 링크를 찾았어요. 불러오는 중…`;
+  el.classList.toggle('done', !!done);
+  el.hidden = false;
+}
+
+function startFrom(text, source) {
+  const link = findLink(text);
+  if (!link) return false;
+  $('url').value = link;
+  lookup(link, source);
+  return true;
+}
+
+$('form').addEventListener('submit', (e) => { e.preventDefault(); lookup($('url').value.trim(), null); });
+
+/* ---------- 클립보드 자동 인식 ---------- */
+// 브라우저 정책: Chrome은 최초 1회 허용 후 자동, Safari/Firefox는 읽을 때마다 확인창, HTTP 주소에서는 사용 불가.
+const clipboardSupported = !!(navigator.clipboard && navigator.clipboard.readText && window.isSecureContext);
+
+// 방금 처리한 링크가 클립보드에 그대로 남아 있어도, 앱을 열 때마다 다시 불러오지 않도록 30분간 기억합니다.
+// (그 뒤나 "붙여넣기" 버튼으로는 언제든 다시 받을 수 있어요.)
+const CLIP_TTL_MS = 30 * 60 * 1000;
+function seenRecently(link) {
+  try { const v = JSON.parse(store.get('lastClip') || 'null'); return !!v && v.link === link && Date.now() - v.ts < CLIP_TTL_MS; }
+  catch { return false; }
+}
+function markSeen(link) { store.set('lastClip', JSON.stringify({ link, ts: Date.now() })); }
+
+async function checkClipboard() {
+  if (!clipboardSupported || busy || document.visibilityState !== 'visible') return;
   try {
-    const res = await api('/api/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: $('url').value }),
-    });
-    render(await res.json());
-    setStatus('', '');
+    const text = await navigator.clipboard.readText();
+    const link = findLink(text);
+    if (link && !seenRecently(link)) {
+      markSeen(link);
+      startFrom(link, 'clipboard');
+    }
+    $('hint').hidden = true;
   } catch (e) {
-    setStatus('error', e.message);
-  } finally {
-    btn.disabled = false;
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+      $('hint').textContent = '클립보드 자동 인식이 막혀 있어요. 아래 "붙여넣기" 버튼을 눌러 주세요.';
+      $('hint').hidden = false;
+    }
+  }
+}
+
+$('paste').addEventListener('click', async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) return toast('클립보드가 비어 있어요. 인스타그램에서 링크를 복사해 주세요.', 'info');
+    $('url').value = text.trim();
+    const link = findLink(text);
+    if (link) markSeen(link);
+    lookup($('url').value, null);
+  } catch {
+    $('url').focus();
+    toast('주소 입력칸을 길게 눌러 붙여넣어 주세요.', 'info');
   }
 });
 
-$('all').addEventListener('click', (ev) => download(ev.currentTarget, null));
+/* ---------- 공유/링크로 열었을 때 ( ?url= , 공유 대상 ) ---------- */
+function handleLaunchParams() {
+  const q = new URLSearchParams(location.search);
+  const text = ['url', 'text', 'title'].map((k) => q.get(k)).filter(Boolean).join(' ');
+  if (!text) return false;
+  history.replaceState(null, '', location.pathname);
+  return startFrom(text, 'share');
+}
+
+/* ---------- 시작 ---------- */
+$('autosave').checked = store.get('autosave') === '1';
+$('autosave').addEventListener('change', (e) => store.set('autosave', e.target.checked ? '1' : '0'));
+if (!clipboardSupported) {
+  $('hint').textContent = '이 주소에서는 클립보드 자동 인식을 쓸 수 없어요 (HTTPS 또는 localhost에서만 가능). 붙여넣기 버튼은 사용할 수 있어요.';
+  $('hint').hidden = false;
+}
+if (!handleLaunchParams()) checkClipboard();
+document.addEventListener('visibilitychange', checkClipboard);
+window.addEventListener('focus', checkClipboard);
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 </script>
 </body>
 </html>

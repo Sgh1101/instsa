@@ -110,6 +110,12 @@ def _extract(url: str, opts: dict, download: bool) -> dict:
 def _translate(message: str) -> IgError:
     msg = re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*[\w-]+:\s*)?", "", message).strip()
     low = msg.lower()
+    if "429" in low or "too many requests" in low:
+        return IgError(
+            "인스타그램이 요청을 일시적으로 제한했어요. 몇 분 뒤에 다시 시도해 주세요. "
+            "자주 생기면 쿠키 설정을 해 보세요 (README의 '쿠키 설정' 참고).",
+            429,
+        )
     if any(k in low for k in ("login", "log in", "cookies", "rate-limit", "empty media response")):
         return IgError(
             "로그인이 필요한 게시물이거나 인스타그램이 요청을 제한했습니다. "
