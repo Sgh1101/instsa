@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
     static final String HOST = "app.local";
     private static final int REQ_LOGIN = 1;
     /** 한 번에 쌓을 수 있는 링크 수. 너무 많이 한꺼번에 요청하면 인스타그램이 계정을 제한할 수 있습니다. */
-    private static final int MAX_BATCH = 30;
+    static final int MAX_BATCH = 30;
 
     private static final Pattern IG_LINK = Pattern.compile(
             "https?://(?:www\\.|m\\.)?instagram\\.com/(?:[A-Za-z0-9_.]+/)?(?:p|reels?|tv)/[A-Za-z0-9_-]+/?(?:\\?[^\\s]*)?",
@@ -231,7 +231,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void save(int id, String url, int index) {
             runOnUiThread(() -> {
-                askNotificationPermissionOnce();
+                Permissions.askNotificationsOnce(MainActivity.this);
                 // 서비스가 저장하므로 앱을 나가도 계속됩니다. 앱이 화면에 있는 지금 시작해야 합니다(안드로이드 12+).
                 SaveService.enqueue(MainActivity.this, id, url, index);
             });
@@ -246,7 +246,7 @@ public class MainActivity extends Activity {
                 if (n == 0) {
                     return 0;
                 }
-                runOnUiThread(MainActivity.this::askNotificationPermissionOnce);
+                runOnUiThread(() -> Permissions.askNotificationsOnce(MainActivity.this));
                 int batch = SaveService.registerBatch(n);
                 for (int i = 0; i < n; i++) {
                     SaveService.enqueueInBatch(MainActivity.this, batch, urls.getString(i), skipSaved);
@@ -332,7 +332,7 @@ public class MainActivity extends Activity {
     }
 
     /** 글 속의 인스타그램 링크를 모두(중복 제거) 줄바꿈으로 이어 돌려줍니다. 없으면 빈 문자열. */
-    private static String allLinks(String text) {
+    static String allLinks(String text) {
         Matcher m = IG_LINK.matcher(text == null ? "" : text);
         java.util.LinkedHashSet<String> links = new java.util.LinkedHashSet<>();
         while (m.find()) {
@@ -392,16 +392,6 @@ public class MainActivity extends Activity {
     protected void onStop() {
         SaveService.appVisible = false;
         super.onStop();
-    }
-
-    /** 안드로이드 13+는 알림 권한이 필요합니다. 거절해도 저장은 되고, 알림만 안 보입니다. 한 번만 묻습니다. */
-    private void askNotificationPermissionOnce() {
-        if (android.os.Build.VERSION.SDK_INT < 33) return;
-        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) return;
-        android.content.SharedPreferences prefs = getSharedPreferences("app", MODE_PRIVATE);
-        if (prefs.getBoolean("asked_notifications", false)) return;
-        prefs.edit().putBoolean("asked_notifications", true).apply();
-        requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 100);
     }
 
     @Override

@@ -34,6 +34,22 @@
             </intent-filter>
         </activity>
 
+        <!-- 공유 시트의 "바로 저장": 앱 화면을 열지 않고 백그라운드 저장만 시작하는 투명 화면 -->
+        <activity
+            android:name=".QuickSaveActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="바로 저장 (인스타 저장)"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".SaveService"
             android:exported="false"
